@@ -1,0 +1,125 @@
+--- a/atspi/atspi-misc.c
++++ b/atspi/atspi-misc.c
+@@ -401,6 +401,13 @@
+   dbus_pending_call_set_notify (new_pending, handle_get_items, app, NULL);
+ }
+ 
++/* Verify app-private runtime selection before initializing accessibility. */
++int
++gtools_atspi_runtime_revision (void)
++{
++  return 1;
++}
++
+ static AtspiApplication *
+ get_application (const char *bus_name)
+ {
+@@ -424,6 +431,9 @@
+   gettimeofday (&app->time_added, NULL);
+   app->cache = ATSPI_CACHE_UNDEFINED;
+   g_hash_table_insert (app_hash, bus_name_dup, app);
++  /* Use the authenticated accessibility bus. Direct connections in older
++   * toolkit bridges retain credentials/pidfds after disconnect. */
++  return app;
+   message = dbus_message_new_method_call (bus_name, atspi_path_root,
+                                           atspi_interface_application, "GetApplicationBusAddress");
+ 
+--- a/atk-adaptor/bridge.c
++++ b/atk-adaptor/bridge.c
+@@ -677,16 +677,59 @@
+   return FALSE;
+ }
+ 
++/* Verify app-private runtime selection before initializing accessibility. */
++int
++gtools_atk_bridge_runtime_revision (void)
++{
++  return 1;
++}
++
++static void
++remove_direct_connection (DBusConnection *connection)
++{
++  GList *link;
++
++  link = g_list_find (spi_global_app_data->direct_connections, connection);
++  if (!link)
++    return;
++
++  droute_context_unregister (spi_global_app_data->droute, connection);
++  droute_unintercept_dbus (connection);
++  spi_global_app_data->direct_connections =
++      g_list_delete_link (spi_global_app_data->direct_connections, link);
++  dbus_connection_unref (connection);
++}
++
++static DBusHandlerResult
++direct_connection_filter (DBusConnection *connection,
++                          DBusMessage *message,
++                          void *user_data)
++{
++  if (dbus_message_is_signal (message, DBUS_INTERFACE_LOCAL, "Disconnected"))
++    {
++      dbus_connection_remove_filter (connection,
++                                     direct_connection_filter,
++                                     NULL);
++      remove_direct_connection (connection);
++    }
++
++  return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++}
++
+ static void
+ new_connection_cb (DBusServer *server, DBusConnection *con, void *data)
+ {
+   dbus_connection_set_unix_user_function (con, user_check, NULL, NULL);
++  if (!dbus_connection_add_filter (con, direct_connection_filter, NULL, NULL))
++    return;
++
+   dbus_connection_ref (con);
+   atspi_dbus_connection_setup_with_g_main (con, spi_context);
+   droute_intercept_dbus (con);
+   droute_context_register (spi_global_app_data->droute, con);
+ 
+-  spi_global_app_data->direct_connections = g_list_append (spi_global_app_data->direct_connections, con);
++  spi_global_app_data->direct_connections =
++      g_list_append (spi_global_app_data->direct_connections, con);
+ }
+ 
+ static gchar *atspi_dbus_name = NULL;
+@@ -1305,7 +1348,6 @@
+ void
+ atk_bridge_adaptor_cleanup (void)
+ {
+-  GList *l;
+   GSList *ls;
+ 
+   if (!inited)
+@@ -1321,19 +1363,18 @@
+ 
+   deactivate_bus ();
+ 
+-  for (l = spi_global_app_data->direct_connections; l; l = l->next)
++  while (spi_global_app_data->direct_connections)
+     {
+       DBusConnection *connection;
+ 
+-      connection = l->data;
+-
+-      droute_context_unregister (spi_global_app_data->droute, connection);
+-      droute_unintercept_dbus (connection);
++      connection = spi_global_app_data->direct_connections->data;
++
++      dbus_connection_remove_filter (connection,
++                                     direct_connection_filter,
++                                     NULL);
+       dbus_connection_close (connection);
+-      dbus_connection_unref (connection);
+-    }
+-  g_list_free (spi_global_app_data->direct_connections);
+-  spi_global_app_data->direct_connections = NULL;
++      remove_direct_connection (connection);
++    }
+ 
+   for (ls = clients; ls; ls = ls->next)
+     g_free (ls->data);

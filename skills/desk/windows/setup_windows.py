@@ -1,0 +1,90 @@
+"""Idempotent Windows install; binaries, environments and models stay off the shared Drive."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import winreg
+
+ROOT=Path(__file__).resolve().parent.parent
+STATE=Path(os.environ.get("DESK_STATE",Path.home()/".cache"/"desk"))
+BASE=["pillow","psutil","winrt-runtime","winrt-Windows.Foundation","winrt-Windows.Foundation.Collections",
+      "winrt-Windows.Globalization","winrt-Windows.Media.Ocr","winrt-Windows.Graphics.Imaging",
+      "winrt-Windows.Storage","winrt-Windows.Storage.Streams","huggingface_hub>=0.34,<1"]
+
+
+def call(*argv):
+    subprocess.run([str(a) for a in argv],check=True)
+
+
+def install_commands(py):
+    bin_dir=Path.home()/".local"/"bin"
+    bin_dir.mkdir(parents=True,exist_ok=True)
+    # The ASCII junction path avoids cmd.exe decoding a UTF-8 batch file as the legacy code page.
+    entry=Path.home()/".codex"/"skills"/"desk"/"desk.py"
+    command='@echo off\r\npy -3 -X utf8 "%USERPROFILE%\\.codex\\skills\\desk\\desk.py" %*\r\nexit /b %errorlevel%\r\n'
+    (bin_dir/"desk.cmd").write_bytes(command.encode("utf-8"))
+    # Scripts in a user directory are discoverable; the full path is also usable in -NoProfile shells.
+    ps='& "'+str(py)+'" -X utf8 "'+str(entry)+'" @args\nexit $LASTEXITCODE\n'
+    (bin_dir/"desk.ps1").write_text(ps,encoding="utf-8-sig")
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER,"Environment") as key:
+        try:old,_=winreg.QueryValueEx(key,"Path")
+        except FileNotFoundError:old=""
+        entries=[e for e in old.split(";") if e and e.casefold()!=str(bin_dir).casefold()]
+        winreg.SetValueEx(key,"Path",0,winreg.REG_EXPAND_SZ,str(bin_dir)+";"+";".join(entries))
+    # A native launcher preserves Unicode arguments without requiring script policy changes.
+    import json
+    framework=Path(os.environ["WINDIR"])/"Microsoft.NET"/"Framework64"/"v4.0.30319"
+    call(framework/"csc.exe","/nologo","/target:exe","/platform:x64","/r:System.Web.Extensions.dll",
+         "/out:"+str(bin_dir/"desk.exe"),ROOT/"windows"/"DeskLauncher.cs")
+    (bin_dir/"desk-launch.json").write_text(json.dumps({"python":str(py),"entry":str(entry)}),encoding="utf-8")
+    import ctypes
+    docs_buffer=ctypes.create_unicode_buffer(32768)
+    if ctypes.windll.shell32.SHGetFolderPathW(None,5,None,0,docs_buffer)!=0:
+        raise RuntimeError("Windows 문서 폴더 경로를 조회하지 못했습니다")
+    docs=Path(docs_buffer.value)
+    # Remove only our earlier development registration; preserve all other profile content.
+    import re
+    for docs_dir in {docs,Path.home()/"Documents"}:
+        for folder in ("WindowsPowerShell","PowerShell"):
+            profile=docs_dir/folder/"profile.ps1"
+            if not profile.exists():continue
+            prior=profile.read_text(encoding="utf-8-sig")
+            clean=re.sub(r"\n# desk: shared macOS/Windows computer control\nfunction global:desk \{[^\n]*\}\n?", "\n", prior)
+            if clean!=prior:
+                if clean.strip():profile.write_text(clean,encoding="utf-8-sig")
+                else:profile.unlink()
+    for base in (Path.home()/".codex"/"skills",Path.home()/".agents"/"skills"):
+        base.mkdir(parents=True,exist_ok=True)
+        link=base/"desk"
+        if not link.exists():
+            call("cmd","/c","mklink","/J",str(link),str(ROOT))
+        elif link.resolve()!=ROOT.resolve():
+            raise RuntimeError("기존 desk 스킬 경로를 보존했습니다. 연결 대상이 다릅니다: "+str(link))
+    result=ctypes.c_size_t()
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF,0x1A,0,"Environment",2,3000,ctypes.byref(result))
+    print("설치: "+str(bin_dir/"desk.cmd"))
+    print("Windows: desk.exe 또는 desk.cmd (desk.cpl 충돌을 피하려면 확장자/절대 경로 명시)")
+
+
+def setup(args,install=False):
+    py=STATE/"windows"/"Scripts"/"python.exe"
+    if not py.exists():
+        call(sys.executable,"-m","venv",STATE/"windows")
+    if not install:
+        call(py,"-m","pip","install",*BASE)
+        if "--detector" in args or "--vision" in args:
+            cuda=bool(__import__("shutil").which("nvidia-smi"))
+            call(py,"-m","pip","install","torch","torchvision","--index-url",
+                 "https://download.pytorch.org/whl/cu128" if cuda else "https://download.pytorch.org/whl/cpu")
+        if "--detector" in args:
+            from huggingface_hub import hf_hub_download
+            hf_hub_download("microsoft/OmniParser-v2.0","icon_detect_v3/model.pt",revision="refs/pr/37",local_dir=str(STATE/"omni"/"weights"))
+        if "--vision" in args:
+            call(py,"-m","pip","install","transformers>=4.50,<5","accelerate","num2words")
+            from huggingface_hub import snapshot_download
+            import json
+            model="HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+            snapshot_download(model,ignore_patterns=["*.onnx","*.bin","*.gguf"])
+            (STATE/"vision.json").write_text(json.dumps({"model":model,"mode":"shadow","language":"English"}),encoding="utf-8")
+    install_commands(py)
+    print("Windows desk 준비 완료. desk.cmd doctor로 확인하세요.")

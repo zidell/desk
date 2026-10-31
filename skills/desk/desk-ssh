@@ -1,0 +1,69 @@
+#!/bin/bash
+# desk-ssh: SSH로 접속한 셸에서 그 Mac의 화면을 desk로 다루기 위한 중계.
+# SSH 세션은 콘솔 GUI 세션 밖이라 화면 캡처·입력이 막힌다. 콘솔에 로그인돼 있는 Terminal.app에
+# 상주 워커를 띄우고, 워커가 큐로 받은 desk 명령을 GUI 세션 안에서 실행해 결과를 돌려준다.
+#
+#   desk-ssh start                 워커 시작(이미 돌고 있으면 그대로 둔다)
+#   desk-ssh run '<desk 명령들>' [초] 명령 묶음 실행, 출력과 종료 코드를 그대로 돌려준다(기본 120초)
+#   desk-ssh stop                  워커 종료
+#   desk-ssh status                워커 상태
+set -u
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="${DESK_STATE:-$HOME/.cache/desk}/ssh"
+mkdir -p "$STATE"
+
+worker_alive() { [ -f "$STATE/worker.pid" ] && kill -0 "$(cat "$STATE/worker.pid")" 2>/dev/null; }
+
+start() {
+	worker_alive && { echo "워커 실행 중 (pid $(cat "$STATE/worker.pid"))"; return 0; }
+	rm -f "$STATE/stop" "$STATE/cmd.sh" "$STATE/out.txt" "$STATE/worker.pid"
+	cat >"$STATE/worker.command" <<EOF
+#!/bin/bash
+desk() { bash "$SKILL_DIR/desk" "\$@"; }
+echo \$\$ >"$STATE/worker.pid"
+tty >"$STATE/worker.tty"
+echo "desk-ssh 워커: SSH 세션의 desk 명령을 이 화면에서 실행한다. 닫으면 중계가 끊긴다."
+while [ ! -f "$STATE/stop" ]; do
+	if [ -f "$STATE/cmd.sh" ]; then
+		mv "$STATE/cmd.sh" "$STATE/cur.sh"
+		( source "$STATE/cur.sh" ) >"$STATE/out.tmp" 2>&1
+		echo \$? >"$STATE/code.tmp"
+		mv "$STATE/code.tmp" "$STATE/code"
+		mv "$STATE/out.tmp" "$STATE/out.txt"
+	fi
+	sleep 0.2
+done
+rm -f "$STATE/worker.pid"
+# 이 워커가 띄운 창만 닫는다. 셸이 끝난 뒤 닫아야 종료 확인 창이 뜨지 않는다
+( sleep 1; osascript -e "tell application \"Terminal\" to close (every window whose tty of selected tab is \"\$(cat "$STATE/worker.tty")\")" ) >/dev/null 2>&1 &
+exit
+EOF
+	chmod +x "$STATE/worker.command"
+	open -a Terminal "$STATE/worker.command"
+	for _ in $(seq 1 50); do worker_alive && { echo "워커 시작 (pid $(cat "$STATE/worker.pid"))"; return 0; }; sleep 0.2; done
+	echo "desk-ssh: 워커가 뜨지 않음 — 콘솔에 로그인돼 있는지, Terminal.app이 열리는지 확인" >&2
+	return 2
+}
+
+run() {
+	worker_alive || start >/dev/null || return 2
+	rm -f "$STATE/out.txt" "$STATE/code"
+	printf '%s\n' "$1" >"$STATE/cmd.tmp" && mv "$STATE/cmd.tmp" "$STATE/cmd.sh"
+	local limit=$((${2:-120} * 5))
+	for _ in $(seq 1 "$limit"); do [ -f "$STATE/out.txt" ] && break; sleep 0.2; done
+	[ -f "$STATE/out.txt" ] || { echo "desk-ssh: 시간 초과 — 명령은 워커에서 계속 돌 수 있다" >&2; return 2; }
+	cat "$STATE/out.txt"
+	return "$(cat "$STATE/code" 2>/dev/null || echo 2)"
+}
+
+case "${1:-}" in
+start) start ;;
+run) shift; run "$@" ;;
+stop)
+	touch "$STATE/stop"
+	for _ in $(seq 1 25); do worker_alive || break; sleep 0.2; done
+	worker_alive && echo "desk-ssh: 워커가 아직 종료되지 않음" >&2 || echo "워커 종료, 창 닫음"
+	;;
+status) worker_alive && echo "실행 중 (pid $(cat "$STATE/worker.pid"))" || echo "꺼짐" ;;
+*) sed -n 2,10p "${BASH_SOURCE[0]}"; exit 2 ;;
+esac

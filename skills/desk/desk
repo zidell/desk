@@ -1,0 +1,1102 @@
+#!/bin/bash
+# desk: AI-agnostic computer control for macOS, done only through what is on screen, in plain sight.
+# The AI sees the screen (screenshot / local OCR) and acts with the visible pointer and keyboard;
+# the panel at the bottom shows each action, and ESC once (or its 중지 button) stops everything:
+# every command then refuses (exit 3) until the next `desk begin`. Every action is logged.
+# Division of work: the AI judges, desk gives it the screen as fully and truly as it can (what the AI
+# cannot see for itself — a U+2011 hyphen that looks like "-", a menu's open state) and carries out what
+# it decided, exactly. What the AI can work out from desk's output is not made into a rule here.
+# Usage: desk help
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) exec py -3 -X utf8 "$(dirname "$(readlink -f "$0")")/desk.py" "$@" ;;
+    Linux) exec python3 "$(dirname "$(readlink -f "$0")")/desk.py" "$@" ;;
+    Darwin) ;;
+    *) echo "desk: 지원하지 않는 OS입니다: $(uname -s)" >&2; exit 2 ;;
+esac
+set -u
+
+SELF=$(readlink -f "$0")
+DIR=$(dirname "$SELF")
+export DESK_WIDGET="$DIR/widget.json"
+STATE="${DESK_STATE:-$HOME/.cache/desk}"
+BIN="$STATE/desk-helper"
+LOG="$STATE/actions.log"
+mkdir -p "$STATE/running" "$STATE/shots"
+
+STOP_MSG="중지됨: 사용자가 컴퓨터 제어를 중지했습니다(ESC 한 번 또는 중지 버튼). desk 명령을 더 실행하지 말고, 한 일과 멈춘 지점을 사용자에게 보고하세요. 다시 하려면 사용자가 새로 요청해야 합니다."
+
+die() { echo "desk: $*" >&2; exit 2; }
+
+build() {
+    if [ ! -x "$BIN" ] || [ "$DIR/desk-helper.swift" -nt "$BIN" ]; then
+        swiftc -O -swift-version 5 "$DIR/desk-helper.swift" -o "$BIN.tmp" 2>"$STATE/build.log" \
+            || die "헬퍼 빌드 실패: $STATE/build.log"
+        mv "$BIN.tmp" "$BIN"
+    fi
+}
+
+overlay_running() {
+    [ -f "$STATE/overlay.pid" ] && kill -0 "$(cat "$STATE/overlay.pid")" 2>/dev/null
+}
+
+ensure_overlay() {
+    overlay_running && return
+    nohup "$BIN" overlay >/dev/null 2>&1 &
+    disown
+    for _ in $(seq 1 30); do overlay_running && return; sleep 0.1; done
+    die "중지 패널을 띄우지 못했습니다"
+}
+
+check_stopped() {
+    if [ -f "$STATE/stopped" ]; then echo "$STOP_MSG" >&2; exit 3; fi
+}
+
+# The front window as desk last left it ("x,y,w,h<TAB>app · title"). While the AI thinks, the user may
+# bring another window forward, switch apps or move the window; acting on what was read before that
+# would hit something else. Actions on the screen (GUARD=1) refuse then, with exit code 6.
+expect_save() { "$BIN" window >"$STATE/expect" 2>/dev/null; "$BIN" focused >"$STATE/expect-focus" 2>/dev/null; }
+# Which window it is: frame and pid:windowID, not the title (a web app may rewrite its own title).
+win_key() { cut -f1,3 <<<"$1"; }
+expect_check() {  # expect_check [EXPECTED]
+    local want="${1:-}" now
+    [ -n "$want" ] || { [ -f "$STATE/expect" ] || return 0; want=$(cat "$STATE/expect"); }
+    now=$("$BIN" window)
+    [ "$(win_key "$now")" = "$(win_key "$want")" ] && return 0
+    echo "desk: 화면이 바뀌어 하지 않음 — 마지막으로 본 창: $(cut -f2 <<<"$want") [$(cut -f1 <<<"$want")] → 지금: $(cut -f2 <<<"$now") [$(cut -f1 <<<"$now")]. 사용자가 다른 창을 띄웠거나 옮겼을 수 있다: desk see로 다시 보고, 사용자가 개입한 것이면 묻고 이어갈 것 (종료 코드 6)" >&2
+    focus_note "화면이 바뀌어 멈춤" miss
+    return 6
+}
+GUARD=0
+
+# The user's own hand: the panel touches $STATE/user-input on any key, pointer move, click or scroll desk
+# did not send. Every desk command waits until the user has been still USER_IDLE seconds, and what an
+# action was about to act on is checked again before it goes on (the user may have been about to press it).
+USER_IDLE="${DESK_USER_IDLE:-5}"
+# A handoff ends on a longer stillness: a password typed with pauses, then the login taking a few seconds.
+HANDOFF_IDLE="${DESK_HANDOFF_IDLE:-10}"
+USER_MOVED=0
+user_input_age() {
+    [ -f "$STATE/user-input" ] || { echo 999; return; }
+    echo $(($(date +%s) - $(stat -f %m "$STATE/user-input")))
+}
+wait_user_still() {  # 0 = the user moved and has now been still USER_IDLE s; 1 = no recent input
+    [ "$(user_input_age)" -lt "$USER_IDLE" ] || return 1
+    echo "$(date '+%F %T') 사용자 움직임 감지 · 멈추고 ${USER_IDLE}초 기다리는 중" >>"$LOG"
+    focus_note "사용자 움직임 — 멈추면 ${USER_IDLE}초 뒤 이어감" miss
+    while [ "$(user_input_age)" -lt "$USER_IDLE" ]; do check_stopped; sleep 0.3; done
+    echo "$(date '+%F %T') 사용자 멈춤 · 화면 다시 확인하고 이어감" >>"$LOG"
+    USER_MOVED=1
+}
+# After the user moved: keys go only where desk left the keyboard focus.
+focus_still() {
+    [ "$USER_MOVED" = 1 ] || return 0
+    [ "$("$BIN" focused)" = "$(cat "$STATE/expect-focus" 2>/dev/null)" ] && return 0
+    echo "desk: 사용자가 움직인 사이 키보드 포커스가 바뀌어 입력하지 않음 — desk see로 보고 입력칸을 다시 고를 것 (종료 코드 6)" >&2
+    focus_note "포커스가 바뀌어 멈춤" miss
+    return 6
+}
+
+# Runs one action: refuses when stopped, shows it on the panel, logs it, dies with the kill switch.
+act() {
+    local label="$1"; shift
+    check_stopped
+    build
+    ensure_overlay
+    touch "$STATE/last"
+    echo "$(date '+%F %T') $label" >>"$LOG"
+    local child
+    trap 'kill "$child" 2>/dev/null; rm -f "$STATE/running/$$"; echo "$STOP_MSG" >&2; exit 3' TERM
+    echo $$ >"$STATE/running/$$"
+    # Reading the screen too: what is read while the user's hand is on it is out of date at once.
+    wait_user_still || true
+    if [ "$GUARD" = 1 ]; then
+        if ! expect_check; then rm -f "$STATE/running/$$"; trap - TERM; return 6; fi
+        "$BIN" frontpid >"$STATE/target-pid"  # every event of this action checks it (desk-helper lockTarget)
+    fi
+    "$@" &
+    child=$!
+    wait "$child"
+    local rc=$?
+    rm -f "$STATE/running/$$"
+    trap - TERM
+    # An app that came forward during the action is not taken as the new normal: the next action refuses.
+    if [ "$GUARD" != 1 ] || [ "$("$BIN" frontpid)" = "$(cat "$STATE/target-pid" 2>/dev/null)" ]; then expect_save; fi
+    check_stopped
+    return $rc
+}
+
+helper() { "$BIN" "$@"; }
+
+# Terminal-app grants (TCC). Reported, never changed: the user grants them in System Settings.
+PERM_HELP_AX='시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 이 터미널 앱을 켜고 터미널을 다시 실행하세요'
+PERM_HELP_SCREEN='시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음(화면 기록)에서 이 터미널 앱을 켜고 터미널을 다시 실행하세요'
+permission_report() {
+    local name state
+    while IFS=$'\t' read -r name state; do
+        echo "$name: $state"
+        [ "$state" = missing ] || continue
+        case "$name" in
+            accessibility) echo "  → $PERM_HELP_AX" ;;
+            screen-recording) echo "  → $PERM_HELP_SCREEN" ;;
+        esac
+    done < <(helper permissions "$@")
+    [ -n "${SSH_CONNECTION:-}" ] && echo "ssh: SSH 셸은 화면 권한을 받을 수 없습니다 → desk-ssh run 사용 (docs/macos.md)"
+    return 0
+}
+permission_warnings() {
+    local perms
+    perms=$(helper permissions)
+    case "$perms" in *$'accessibility\tmissing'*) echo "desk: 손쉬운 사용 권한 없음 — 클릭·입력·ESC 중지가 막힙니다. $PERM_HELP_AX" >&2 ;; esac
+    case "$perms" in *$'screen-recording\tmissing'*) echo "desk: 화면 기록 권한 없음 — 화면을 읽을 수 없습니다. $PERM_HELP_SCREEN" >&2 ;; esac
+    return 0
+}
+
+# The terminal this agent runs in may be the front app (or part of it: Gifiles is a file manager with
+# a terminal pane). Its pane shows the agent's own commands (a search for '문의' finds the command
+# line) and keys typed into it land in the agent's prompt. So, only while that app is in front:
+#   - the pane (the focused text area seen while the agent works) is left out of clicks and searches;
+#   - keys go through only when focus is on a list/table/button-like control, never a text area.
+host_front() {
+    local front pid
+    front=$("$BIN" frontpid)
+    pid=$$
+    while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+        [ "$pid" = "$front" ] && return 0
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    done
+    return 1
+}
+
+# Remembers the agent's pane: the big text area that has focus in the host app.
+pane_update() {
+    local role frame w h
+    IFS=$'\t' read -r role _ frame < <("$BIN" focused)
+    case "$role" in AXGroup|AXTextArea|AXTextField|AXScrollArea|AXWebArea) ;; *) return 0 ;; esac
+    IFS=, read -r _ _ w h <<<"$frame"
+    [ "${w:-0}" -gt 300 ] && [ "${h:-0}" -gt 150 ] && echo "$frame" >"$STATE/agent-pane"
+    return 0
+}
+
+in_pane() {  # in_pane X Y
+    [ -f "$STATE/agent-pane" ] || return 1
+    local px py pw ph
+    IFS=, read -r px py pw ph <"$STATE/agent-pane"
+    [ "$1" -ge "$px" ] && [ "$1" -le $((px + pw)) ] && [ "$2" -ge "$py" ] && [ "$2" -le $((py + ph)) ]
+}
+
+# Drops lines whose "x,y" (field N, tab-separated) falls in the agent's pane, while the host is in front.
+drop_pane() {
+    local field="${1:-1}"
+    if ! host_front || [ ! -f "$STATE/agent-pane" ]; then cat; return; fi
+    awk -F'\t' -v f="$field" -v r="$(cat "$STATE/agent-pane")" '
+        BEGIN { split(r, p, ",") }
+        { split($f, c, ","); if (c[1] >= p[1] && c[1] <= p[1] + p[3] && c[2] >= p[2] && c[2] <= p[2] + p[4]) next; print }'
+}
+
+in_panel() {  # in_panel X Y
+    [ -f "$STATE/panel-rect" ] || return 1
+    local px py pw ph
+    IFS=, read -r px py pw ph <"$STATE/panel-rect"
+    [ "$1" -ge "$px" ] && [ "$1" -le $((px + pw)) ] && [ "$2" -ge "$py" ] && [ "$2" -le $((py + ph)) ]
+}
+
+# What is in front of the window takes the press: outside a dialog (a Chrome alert dims the page and
+# swallows clicks), or inside another app's window, a press does nothing where it is aimed. Checked fresh
+# before each press — with -q nothing reports the dialog, and clicks went on into an alert-covered page.
+guard_blocker() {  # guard_blocker X Y
+    local b bad
+    b=$("$BIN" blockers 2>/dev/null)
+    [ -n "$b" ] || return 0
+    bad=$(awk -F'\t' -v x="$1" -v y="$2" '{
+        split($3, r, ","); inside = (x >= r[1] && x <= r[1] + r[3] && y >= r[2] && y <= r[2] + r[4])
+        if ($1 == "다른 앱 창") { if (inside) print } else if (!inside) print }' <<<"$b")
+    [ -n "$bad" ] || return 0
+    echo "desk: 앞을 막는 창이 있어 ($1, $2)는 누르지 않음 — 이것부터 처리:" >&2
+    awk -F'\t' '{ split($3, r, ","); printf "  ⚠ 막는 창(%s): %s — 영역 %s (중심 %d,%d)\n", $1, substr($2, 1, 100), $3, r[1] + r[3] / 2, r[2] + r[4] / 2 }' <<<"$bad" >&2
+    focus_note "막는 창이 있어 멈춤" miss
+    return 1
+}
+
+guard_point() {  # guard_point X Y
+    if in_panel "$1" "$2"; then
+        echo "desk: ($1, $2)은 desk 하단 패널 위라 누르지 않음 — 대상이 패널에 가려졌으면 창을 옮기거나 스크롤" >&2
+        return 1
+    fi
+    guard_blocker "$1" "$2" || return 1
+    host_front || return 0
+    pane_update
+    if in_pane "$1" "$2"; then
+        echo "desk: ($1, $2)은 이 에이전트가 도는 터미널 영역이라 누르지 않음" >&2
+        return 1
+    fi
+}
+
+guard_keys() {
+    host_front || return 0
+    pane_update
+    local role frame
+    IFS=$'\t' read -r role _ frame < <("$BIN" focused)
+    case "$role" in
+        AXTable|AXOutline|AXList|AXBrowser|AXRow|AXCell|AXButton|AXCheckBox|AXRadioButton|AXPopUpButton|AXMenuItem) ;;
+        *)
+            echo "desk: 맨 앞이 이 에이전트의 터미널 앱이고 키보드 포커스가 글자 영역(${role:-알 수 없음})이라 키를 보내지 않음 — 목록 같은 대상을 먼저 클릭" >&2
+            return 1 ;;
+    esac
+    if [ -f "$STATE/agent-pane" ] && [ "$frame" = "$(cat "$STATE/agent-pane")" ]; then
+        echo "desk: 키보드 포커스가 이 에이전트의 터미널이라 키를 보내지 않음" >&2
+        return 1
+    fi
+}
+
+guarded_keys() { guard_keys || return 1; focus_still || return 6; focus_note "키 ${*: -1}"; "$@"; }
+click_py() {
+    local py="$STATE/omni/bin/python"
+    if [ ! -x "$py" ] || ! "$py" -I -c 'import PIL' 2>/dev/null; then py="$STATE/evidence/bin/python"; fi
+    "$py" -I "$DIR/desk-click.py" "$@"
+}
+ensure_click_runtime() {
+    local py="$STATE/omni/bin/python"
+    if [ -x "$py" ] && "$py" -I -c 'import PIL' 2>/dev/null; then return 0; fi
+    py="$STATE/evidence/bin/python"
+    if [ ! -x "$py" ]; then python3 -m venv "$STATE/evidence" || return 2; fi
+    "$py" -I -c 'import PIL' 2>/dev/null || "$py" -m pip install --disable-pip-version-check Pillow || return 2
+}
+observe_click() {  # IMAGE REGION [ELEMENTS]
+    local current; current=$("$BIN" window)
+    [ "$(win_key "$current")" = "$(win_key "${CAPTURE_WINDOW:-$current}")" ] || { echo 'desk: 읽는 중 창이 바뀌어 관측을 사용하지 않음' >&2; return 6; }
+    DESK_CAPTURE_INPUT="${CAPTURE_INPUT:-}" click_py observe "$STATE" "$1" "$2" "$current" ${3:+"$3"}
+}
+prepare_click() {  # X Y [BOX]
+    click_py prepare "$STATE" "$1" "$2" "$("$BIN" window)" ${3:+"$3"} || return $?
+    local r; r=$(window_region)
+    capture "$STATE/click-initial.png" "$r" || return $?
+    "$BIN" click-bind "$1" "$2" >"$STATE/click-initial-binding.json" || return $?
+    click_py initial "$STATE" "$STATE/click-initial.png" "$r" "$STATE/click-initial-binding.json"
+}
+guarded_at_click() {
+    guard_point "$1" "$2" || return 1
+    local what; what=$("$BIN" hit "$1" "$2")
+    if [ "${what%%$'\t'*}" = inert ] && [ "${FORCE:-}" != 1 ]; then
+        echo "desk: ($1, $2)은 누를 수 없는 ${what#*$'\t'}(글자·그림)라 누르지 않음 — 진짜 대상을 찾거나, 그래도 누르려면 --force" >&2
+        return 5
+    fi
+    prepare_click "$1" "$2" || return $?
+    "$BIN" guarded-press "$1" "$2" "${3:-left}" "$CLICK_DELAY" "클릭 ($1, $2)" || return $?
+    click_effect && return 0
+    echo "desk: ($1, $2)을 눌렀지만 아무것도 바뀌지 않음 — 글자·라벨·그림이었거나 이미 그 상태" >&2
+    focus_note "반응 없음 ($1, $2)" miss
+    return 5
+}
+guarded_drag() {
+    guard_point "$1" "$2" && guard_point "$3" "$4" || return 1
+    prepare_click "$1" "$2" || return $?
+    "$BIN" guarded-press "$1" "$2" drag "$CLICK_DELAY" "끌기 → ($3, $4)" "$3" "$4"
+}
+# N lines, or "page": 85% of the front window's height in one move.
+guarded_scroll() {
+    guard_point "$1" "$2" || return 1
+    focus_point "$1" "$2" "스크롤 ${3:-} ${4:-5}" now
+    if [ "${4:-}" = page ]; then
+        local size
+        case "$3" in left | right) size=$(window_region | cut -d, -f3) ;; *) size=$(window_region | cut -d, -f4) ;; esac
+        "$BIN" scrollpx "$1" "$2" "$3" $((size * 85 / 100))
+    else
+        "$BIN" scroll "$@"
+    fi
+}
+
+# ── focus layer: what the AI looks at, drawn over the screen by the panel's process (desk-helper.swift,
+# FocusLayer) so the user can follow it. Never in a screenshot: every capture takes it off first.
+focus() {  # focus MODE LABEL [SECONDS] < "x,y,w,h<TAB>kind<TAB>text" lines
+    local tmp="$STATE/focus.$$.$RANDOM" label
+    label=$(printf '%s' "$2" | tr '\t\n' '  ')
+    { printf '%s\t%s\t%s\n' "$1" "$label" "${3:-2.5}"; tr -d '\r'; } >"$tmp" && mv -f "$tmp" "$STATE/focus"
+}
+# Compatibility argument for guarded-press; movement itself supplies visible feedback.
+CLICK_DELAY=0
+announce() {  # announce LABEL X Y < focus lines with the target
+    "$BIN" move "$2" "$3"
+    [ ! -f "$STATE/stopped" ] || return 3
+    # The user moved while the target was shown: wait until they are still, and the caller checks again
+    # (8) before pressing.
+    if [ "$(user_input_age)" -le 1 ]; then wait_user_still; return 8; fi
+    # The screen just before the press, the pointer already resting on the target (click_effect).
+    "$BIN" wins >"$STATE/pre-sig"
+    capture "$STATE/pre.png" "$(window_region)"
+}
+
+# After a press: the same app, the same windows and a byte-identical front window (both captures with
+# the pointer on the target, so hover effects cancel out) mean the click did nothing — it hit text, a
+# label or a picture, or something already in that state.
+click_effect() {
+    [ -f "$STATE/pre.png" ] || return 0
+    local i rc=5
+    for i in 1 2 3; do
+        sleep 0.25
+        if [ "$("$BIN" wins)" != "$(cat "$STATE/pre-sig" 2>/dev/null)" ]; then rc=0; break; fi
+        capture "$STATE/post.png" "$(window_region)"
+        if ! cmp -s "$STATE/post.png" "$STATE/pre.png"; then rc=0; break; fi
+    done
+    rm -f "$STATE/pre.png" "$STATE/post.png" "$STATE/pre-sig"
+    [ "$rc" = 5 ] || rm -f "$STATE/inert"  # the screen changed: what was dead may respond now
+    return $rc
+}
+focus_target() {  # focus_target BOX LABEL X Y [now] — "now": no wait (scrolling only looks)
+    if [ "${5:-}" = now ]; then printf '%s\ttarget\t\n' "$1" | focus target "$2" 3; sleep 0.15
+    else printf '%s\ttarget\t\n' "$1" | announce "$2" "$3" "$4"; fi
+}
+focus_point() { focus_target "$(($1 - 14)),$(($2 - 14)),28,28" "$3" "$1" "$2" "${4:-}"; }
+focus_note() { printf '%s\tframe\t\n' "$(window_region)" | focus "${2:-note}" "$1" 2; }
+# Element lines (elements.tsv) as focus lines, colored by where they came from.
+el_focus() { awk -F'\t' '{ k = index($5, "A") ? "A" : ($3 == "글자" ? "O" : "D"); printf "%s\t%s\t%s\n", $6, k, $4 }'; }
+
+hide_focus() {  # prints a token to remove after the capture
+    local tok
+    mkdir -p "$STATE/hiding"; tok=$(mktemp "$STATE/hiding/XXXXXX")
+    for _ in $(seq 1 25); do [ -e "$STATE/focus-visible" ] || break; sleep 0.02; done
+    printf '%s' "$tok"
+}
+
+
+capture() {  # capture FILE [REGION]
+    local tok rc
+    CAPTURE_WINDOW=$("$BIN" window)
+    CAPTURE_INPUT=$(cat "$STATE/user-input" 2>/dev/null)
+    tok=$(hide_focus)
+    if [ -n "${2:-}" ]; then screencapture -x -R "$2" "$1"; else screencapture -x -m "$1"; fi
+    rc=$?
+    rm -f "$tok"
+    [ "$rc" = 0 ] || die "화면 캡처 실패 (화면 기록 권한, 샌드박스 밖에서 실행했는지 확인)"
+}
+
+full_region() { local w h; read -r w h < <("$BIN" size); echo "0,0,$w,$h"; }
+
+# The front app's front window as "x,y,w,h" clamped to the screen; the whole screen if it has none.
+window_region() {
+    local r sw sh x y w h
+    r=$("$BIN" window | cut -f1)
+    read -r sw sh < <("$BIN" size)
+    [ -n "$r" ] || { echo "0,0,$sw,$sh"; return; }
+    IFS=, read -r x y w h <<<"$r"
+    [ "$x" -lt 0 ] && { w=$((w + x)); x=0; }
+    [ "$y" -lt 0 ] && { h=$((h + y)); y=0; }
+    [ $((x + w)) -gt "$sw" ] && w=$((sw - x))
+    [ $((y + h)) -gt "$sh" ] && h=$((sh - y))
+    echo "$x,$y,$w,$h"
+}
+
+window_title() { "$BIN" window | cut -f2; }
+
+# Screenshot of the front window (or --region / --full) with a screen-coordinate ruler drawn on it:
+# the numbers on the image are click coordinates, whatever size the image is shown at.
+shot() {
+    local out="" region="" ox oy pw raw pxw pxh shrink what="화면 보는 중"
+    region=$(window_region)
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --region) region="$2"; what="자세히 보는 중"; shift 2 ;;
+            --full) region=$(full_region); what="전체 화면 보는 중"; shift ;;
+            *) out="$1"; shift ;;
+        esac
+    done
+    [ -n "$out" ] || out="$STATE/shots/shot-$(date +%H%M%S).png"
+    ls -t "$STATE"/shots/*.png 2>/dev/null | tail -n +30 | xargs rm -f 2>/dev/null
+    raw="$STATE/raw-$$.png"
+    capture "$raw" "$region"
+    IFS=, read -r ox oy pw _ <<<"$region"
+    pxw=$(sips -g pixelWidth "$raw" | awk '/pixelWidth/{print $2}')
+    pxh=$(sips -g pixelHeight "$raw" | awk '/pixelHeight/{print $2}')
+    shrink=$(awk -v w="$pxw" -v h="$pxh" -v m="$SHOT_MAX" 'BEGIN{s=m/(w>h?w:h); print (s<1?s:1)}')
+    local step=100; [ "$pw" -lt 1000 ] && step=50  # a zoomed region gets a finer ruler
+    "$BIN" grid "$raw" "$out" "$ox" "$oy" "$pw" "$step" "$shrink" || die "눈금 그리기 실패"
+    redact_shot "$out" "$raw" "$region"
+    observe_click "$raw" "$region" || return $?
+    rm -f "$raw"
+    sips -Z "$SHOT_MAX" "$out" >/dev/null 2>&1
+    printf '%s\tregion\t\n' "$region" | focus region "$what" 3
+    echo "$out ($(window_title) · 영역 $region · 눈금 숫자 = 화면 좌표 = 클릭 좌표)"
+}
+SHOT_MAX=1800
+
+# ── ask: the narrow question an image is looked at for, asked of a local vision model too ───────────
+# Shadow period: the AI still looks at the image and records its own answer with
+# ask-ref; the local model answers the same picture in the background, and that answer is only compared.
+ASK="$STATE/ask"
+LLM="$STATE/llm"
+ASK_PY="$DIR/desk-ask.py"
+ASK_MODEL="mlx-community/Qwen3.5-4B-4bit"
+ASK_KINDS="글자|숫자|선택|색|창|그림"
+
+ask_py() { local py=/usr/bin/python3; [ -x "$LLM/bin/python" ] && py="$LLM/bin/python"; "$py" -I "$ASK_PY" "$@"; }
+
+ask_worker() {
+    [ -x "$LLM/bin/python" ] || return 0  # no local model: the record keeps only the AI's answer
+    [ -f "$ASK/worker.pid" ] && kill -0 "$(cat "$ASK/worker.pid")" 2>/dev/null && return 0
+    nohup nice -n 10 "$LLM/bin/python" -I "$ASK_PY" work "$ASK" "$ASK_MODEL" >>"$ASK/worker.log" 2>&1 &
+    echo $! >"$ASK/worker.pid"
+    disown
+}
+
+ask() {
+    local region="" kind="" q="" id raw out ox oy pw pxw pxh shrink step=100
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --region) region="$2"; shift 2 ;;
+            --type) kind="$2"; shift 2 ;;
+            *) q="$1"; shift ;;
+        esac
+    done
+    [ -n "$region" ] && [ -n "$kind" ] && [ -n "$q" ] || die "desk ask --region x,y,w,h --type $ASK_KINDS '질문'"
+    [[ "|$ASK_KINDS|" == *"|$kind|"* ]] || die "--type: $ASK_KINDS"
+    mkdir -p "$ASK"
+    ls -t "$ASK"/*.png 2>/dev/null | tail -n +500 | xargs rm -f 2>/dev/null
+    id="$(date +%Y%m%d-%H%M%S)-$$"
+    raw="$ASK/$id.png"
+    capture "$raw" "$region"  # one capture: the AI's picture and the local model's are the same moment
+    observe_click "$raw" "$region" || return $?
+    IFS=, read -r ox oy pw _ <<<"$region"
+    "$BIN" ocr "$raw" "$ox" "$oy" "$pw" | cut -f2 >"$ASK/$id.ocr"
+    ask_py new "$ASK" "$id" "$region" "$kind" "$(window_title)" "$q"
+    out="$STATE/shots/shot-$(date +%H%M%S).png"
+    pxw=$(sips -g pixelWidth "$raw" | awk '/pixelWidth/{print $2}')
+    pxh=$(sips -g pixelHeight "$raw" | awk '/pixelHeight/{print $2}')
+    shrink=$(awk -v w="$pxw" -v h="$pxh" -v m="$SHOT_MAX" 'BEGIN{s=m/(w>h?w:h); print (s<1?s:1)}')
+    [ "$pw" -lt 1000 ] && step=50
+    "$BIN" grid "$raw" "$out" "$ox" "$oy" "$pw" "$step" "$shrink" || die "눈금 그리기 실패"
+    redact_shot "$out" "$raw" "$region"
+    sips -Z "$SHOT_MAX" "$out" >/dev/null 2>&1
+    printf '%s\tregion\t\n' "$region" | focus region "자세히 보는 중" 3
+    ask_worker
+    echo "$out ($(window_title) · 영역 $region · 눈금 숫자 = 화면 좌표 = 클릭 좌표)"
+    echo "질문 $id — 그림을 직접 보고 판단한 답을 desk ask-ref $id '답' 으로 남길 것 (그림에 없으면 '없음')"
+}
+
+# Local OCR (macOS Vision): screen text as "x,y<TAB>text" (x,y = click point), no image tokens.
+# What it read is kept as what the AI has last seen, so the next action reports only what changed.
+read_screen() {
+    local region="" needle="" raw ox oy pw
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --region) region="$2"; shift 2 ;;
+            --window) region=$(window_region); shift ;;
+            --needle) needle="$2"; shift 2 ;;
+            --full) region=$(full_region); shift ;;
+            *) shift ;;
+        esac
+    done
+    # Searches look in the front window (other windows, the agent's terminal among them, are not
+    # the target); a plain read is the whole screen.
+    [ -n "$region" ] || if [ -n "$needle" ]; then region=$(window_region); else region=$(full_region); fi
+    raw="$STATE/ocr-$$.png"
+    capture "$raw" "$region"
+    IFS=, read -r ox oy pw _ <<<"$region"
+    if [ -n "$needle" ]; then
+        "$BIN" ocr "$raw" "$ox" "$oy" "$pw" "$needle"
+    else
+        "$BIN" ocr "$raw" "$ox" "$oy" "$pw" | redact_text | tee "$STATE/seen.tmp"
+        cut -f2 "$STATE/seen.tmp" >"$STATE/seen"
+    fi
+    observe_click "$raw" "$region" || return $?
+    rm -f "$raw" "$STATE/seen.tmp"
+}
+
+# Names compared as the same text: macOS writes Wi‑Fi with a non-breaking hyphen (U+2011) and the AI
+# types "-" ('Wi-Fi' found the OCR text but never the System Settings item); dashes and no-break spaces
+# are folded, and a state mark ("[선택됨]") or a borrowed-label prefix is not part of the name.
+NAME_DASH=$(printf '\342\200\220|\342\200\221|\342\200\222|\342\200\223|\342\200\224|\342\210\222')
+NAME_NBSP=$(printf '\302\240')
+NAME_AWK='function norm(x) { gsub(dash, "-", x); gsub(nbsp, " ", x); return x }
+function bare(x) { x = norm(x); sub(/^\(옆 글자\) /, "", x); sub(/ \[[^]]*\]$/, "", x); return x }'
+
+# Accessibility names of the front window's controls containing the needle: "cx,cy<TAB>name".
+# OCR misses text it reads poorly (small or styled page text: "현재 온도 18.1°" on a weather page),
+# while the page reports it as a control's name, so searches look at both.
+ax_find() {
+    "$BIN" ax 2 2>/dev/null | awk -F'\t' -v t="$1" -v dash="$NAME_DASH" -v nbsp="$NAME_NBSP" "$NAME_AWK"'
+        BEGIN { t = norm(t) } index(norm($3), t) {
+        split($1, b, ","); printf "%d,%d\t%s\n", b[1] + b[3] / 2, b[2] + b[4] / 2, $3 }'
+}
+
+# OCR (front window, or the screen with --full) and, for the front window, accessibility names.
+# Partly masks keys, phone and resident numbers, card numbers in printed screen text (desk-see.py redact).
+redact_text() {
+    local py="$STATE/omni/bin/python"
+    [ -x "$py" ] || py=python3
+    "$py" -I "$DIR/desk-see.py" redact
+}
+# The same spans painted over in a picture the agent will look at: redact_shot OUT RAW REGION
+# (OUT is RAW drawn at full size, before any shrinking). Without the imaging Python it refuses the picture.
+redact_shot() {
+    local ox oy pw tsv="$STATE/redact-ocr-$$.txt"
+    IFS=, read -r ox oy pw _ <<<"$3"
+    "$BIN" ocrb "$2" "$ox" "$oy" "$pw" >"$tsv" || { rm -f "$tsv" "$1"; die "그림 가리기용 OCR 실패"; }
+    "$STATE/omni/bin/python" -I "$DIR/desk-see.py" redact-image "$1" "$tsv" "$ox" "$oy" "$pw" \
+        || { rm -f "$tsv" "$1"; die "그림 가리기 실패 — 그림을 내보내지 않음"; }
+    rm -f "$tsv"
+}
+
+search_text() {
+    local needle="$1" full="${2:-}" ocr="$STATE/find-ocr.$$" ax="$STATE/find-ax.$$"
+    read_screen --needle "$needle" $full >"$ocr" &
+    if [ -z "$full" ]; then ax_find "$needle" >"$ax" & else : >"$ax"; fi
+    wait
+    # One line per text (OCR and nested controls repeat it), at most 15.
+    cat "$ocr" "$ax" | drop_pane 1 | redact_text | awk -F'\t' '!seen[$2]++' | head -n 15
+    rm -f "$ocr" "$ax"
+}
+
+focus_found() {  # stdin: "x,y<TAB>text" hits
+    awk -F'\t' '{ split($1, c, ","); printf "%d,%d,1,1\tpoint\t%s\n", c[1], c[2], $2 }' | focus found "찾음: $1" 2.5
+}
+
+find_text() {
+    local hits
+    hits=$(search_text "$1" ${2:+"$2"})
+    [ -n "$hits" ] || { focus_note "못 찾음: $1" miss; echo "NOT_FOUND: $1" >&2; return 1; }
+    focus_found "$1" <<<"$hits"
+    echo "$hits"
+}
+
+# Polls the screen (local OCR) until the text shows up (or, with --gone, until it is gone).
+wait_for() {
+    local text="" limit=15 gone=0 full="" start=$SECONDS hits
+    while [ $# -gt 0 ]; do
+        case "$1" in --gone) gone=1 ;; --full) full=--full ;; *) if [ -z "$text" ]; then text="$1"; else limit="$1"; fi ;; esac
+        shift
+    done
+    while [ $((SECONDS - start)) -lt "$limit" ]; do
+        hits=$(search_text "$text" $full)
+        if [ "$gone" = 1 ]; then [ -z "$hits" ] && { focus_note "사라짐: $text"; echo "사라짐: $text"; return 0; }
+        else [ -n "$hits" ] && { focus_found "$text" <<<"$hits"; echo "$hits"; return 0; }; fi
+        sleep 0.3
+    done
+    focus_note "$([ "$gone" = 1 ] && echo "안 사라짐" || echo "못 찾음"): $text" miss
+    if [ "$gone" = 1 ]; then echo "STILL_THERE after ${limit}s: $text" >&2; else echo "NOT_FOUND after ${limit}s: $text" >&2; fi
+    return 1
+}
+
+# ── see: OCR + accessibility + detector, merged into one numbered element list ──────────────────
+OMNI="$STATE/omni"
+SEE_PY="$DIR/desk-see.py"
+SOCK="$STATE/omni.sock"
+WEIGHTS="$OMNI/weights/icon_detect_v3/model.pt"
+
+detector_installed() { [ -x "$OMNI/bin/python" ] && [ -f "$WEIGHTS" ]; }
+
+# The detector stays loaded between calls (loading takes a second or two; a frame takes about one).
+start_detector() {
+    detector_installed || return 1
+    [ -S "$SOCK" ] && [ -f "$STATE/omni.pid" ] && kill -0 "$(cat "$STATE/omni.pid")" 2>/dev/null && return 0
+    rm -f "$SOCK"
+    nohup "$OMNI/bin/python" -I "$SEE_PY" serve "$SOCK" "$WEIGHTS" >"$STATE/omni.log" 2>&1 &
+    echo $! >"$STATE/omni.pid"
+    disown
+}
+
+wait_detector() {
+    start_detector || return 1
+    for _ in $(seq 1 100); do [ -S "$SOCK" ] && return 0; sleep 0.1; done
+    return 1
+}
+
+# Builds $STATE/elements.tsv ("N<TAB>cx,cy<TAB>kind<TAB>name<TAB>src<TAB>box") for the front window;
+# all three sources run side by side. Sources in src: A = accessibility, O = OCR, D = detector.
+# MARKS: also draw the numbered picture. "later": unnamed boxes are captioned in the background
+# (caption_bg) instead of before returning — the captioner takes ~2.5 s on a new screen, and the
+# report after an action lists only named elements anyway; see waits for the captions.
+see_build() {
+    local region ox oy pw raw="$STATE/see.png" marks="${1:-}" later="${2:-}" new="$STATE/see-new.png" key
+    region=$(window_region)
+    # settle()'s last capture of this window, just made, saves taking another.
+    if [ "$(cat "$STATE/settled-region" 2>/dev/null)" = "$region" ] \
+        && [ -n "$(find "$STATE/settled.png" -mtime -2s 2>/dev/null)" ]; then
+        mv -f "$STATE/settled.png" "$new"
+    else
+        capture "$new" "$region"
+    fi
+    rm -f "$STATE/settled.png" "$STATE/settled-region"
+    # The same pixels as the last read (captures of an unchanged screen are byte-identical): its
+    # elements still hold. A read takes about 2 s; this check 0.2 s.
+    key="$region $(md5 -q "$new")"
+    if [ -s "$STATE/elements.tsv" ] && [ "$key" = "$(cat "$STATE/see-key" 2>/dev/null)" ] \
+        && { [ -z "$marks" ] || [ -f "$STATE/see-marks.png" ]; }; then
+        rm -f "$new"
+        [ -z "$marks" ] || cp "$STATE/see-marks.png" "$marks"
+        if [ "${DESK_ENABLE_CAPTION:-0}" = 1 ] && [ -z "$later" ] && [ "$(cat "$STATE/see-captioned" 2>/dev/null)" != "$key" ]; then
+            caption_now "$key"  # the background run is still going, or never ran: its cache makes this quick
+        fi
+        cut -f4 "$STATE/elements.tsv" >"$STATE/seen"
+        observe_click "$raw" "$region" "$STATE/elements.tsv" || return $?
+        return 0
+    fi
+    rm -f "$STATE/see-key" "$STATE/see-marks.png" "$STATE/see-captioned"  # until this read is complete
+    mv -f "$new" "$raw"
+    printf '%s' "$region" >"$STATE/see-region"
+    IFS=, read -r ox oy pw _ <<<"$region"
+    "$BIN" ocrb "$raw" "$ox" "$oy" "$pw" >"$STATE/see-ocr.txt" &
+    "$BIN" ax 4 >"$STATE/see-ax.txt" 2>"$STATE/see-ax.err" &
+    "$BIN" blockers >"$STATE/see-block.txt" 2>/dev/null &
+    if wait_detector; then
+        "$OMNI/bin/python" -I "$SEE_PY" detect "$SOCK" "$raw" "$ox" "$oy" "$pw" >"$STATE/see-det.txt" 2>/dev/null &
+    else
+        : >"$STATE/see-det.txt"
+    fi
+    wait
+    # Unnamed elements get the captioner's description of their pixels (source C).
+    DESK_CAPTION_LATER=${later:+1} DESK_SOCK="$SOCK" "$OMNI/bin/python" -I "$SEE_PY" fuse "$STATE/see-ocr.txt" "$STATE/see-ax.txt" "$STATE/see-det.txt" \
+        "$STATE/elements.tsv" "$raw" "$ox" "$oy" "$pw" ${marks:+"$marks"}
+    if [ -f "$STATE/panel-rect" ]; then  # the panel's own labels and input are not the screen
+        awk -F'\t' -v r="$(cat "$STATE/panel-rect")" 'BEGIN { split(r, p, ",") }
+            { split($2, c, ","); if (c[1] >= p[1] && c[1] <= p[1] + p[3] && c[2] >= p[2] && c[2] <= p[2] + p[4]) next; print }' \
+            "$STATE/elements.tsv" >"$STATE/elements.tmp" && mv "$STATE/elements.tmp" "$STATE/elements.tsv"
+    fi
+    cut -f4 "$STATE/elements.tsv" >"$STATE/seen"
+    [ -z "$marks" ] || cp "$marks" "$STATE/see-marks.png"
+    printf '%s' "$key" >"$STATE/see-key"
+    if [ "${DESK_ENABLE_CAPTION:-0}" = 1 ] && [ -n "$later" ]; then caption_bg "$key"; else printf '%s' "$key" >"$STATE/see-captioned"; fi
+    observe_click "$raw" "$region" "$STATE/elements.tsv" || return $?
+}
+
+# Names the unnamed boxes of the read KEY (fuse left them in elements.tsv.todo). The result replaces
+# elements.tsv only while that read is still the last one; numbers do not change.
+caption_run() {  # caption_run KEY IMAGE
+    local key="$1" img="$2" out="$STATE/elements.cap.$$.$RANDOM" ox oy pw
+    IFS=, read -r ox oy pw _ <<<"$(cat "$STATE/see-region")"
+    if [ -s "$STATE/elements.tsv.todo" ] && [ -S "$SOCK" ]; then
+        "$OMNI/bin/python" -I "$SEE_PY" caption "$SOCK" "$STATE/elements.tsv" "$STATE/elements.tsv.todo" "$img" \
+            "$ox" "$oy" "$pw" "$out" 2>/dev/null || { rm -f "$out"; return 1; }
+    else
+        cp "$STATE/elements.tsv" "$out"
+    fi
+    if [ "$(cat "$STATE/see-key" 2>/dev/null)" = "$key" ]; then
+        mv -f "$out" "$STATE/elements.tsv"
+        printf '%s' "$key" >"$STATE/see-captioned"
+        # New names are not a change on the screen: the next report must not list them as new.
+        cut -f4 "$STATE/elements.tsv" >>"$STATE/seen"
+    fi
+    rm -f "$out"
+}
+caption_now() { caption_run "$1" "$STATE/see.png"; }
+caption_bg() {
+    local img="$STATE/caption-$$.png"
+    cp "$STATE/see.png" "$img"  # the next read replaces see.png
+    ( caption_run "$1" "$img"; rm -f "$img" ) >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null
+}
+
+see_notes() {
+    # Whatever takes the input first: deal with it (or ask) before acting on the window behind it.
+    [ -s "$STATE/see-block.txt" ] && awk -F'\t' '{ split($3, b, ","); printf "  ⚠ 막는 창(%s): %s — 영역 %s (중심 %d,%d). 이것부터 처리\n", $1, substr($2, 1, 100), $3, b[1] + b[3] / 2, b[2] + b[4] / 2 }' "$STATE/see-block.txt"
+    [ -s "$STATE/see-ax.txt" ] || echo "  (손쉬운 사용 정보 없음: $(head -c 200 "$STATE/see-ax.err" 2>/dev/null | tr '\n' ' ')— 이 화면은 OCR·검출만)"
+    [ -s "$STATE/see-det.txt" ] || echo "  (검출기 결과 없음: $STATE/omni.log)"
+}
+
+scan_focus() {  # scan_focus LABEL < element lines
+    { printf '%s\tframe\t\n' "$(cat "$STATE/see-region" 2>/dev/null)"; el_focus; } | focus scan "$1" 3
+}
+
+fmt_elements() { awk -F'\t' '{printf "  %s\t%s\t%s\t%s\t[%s]\n", $1, $2, $3, $4, $5}'; }
+
+# Full list + a picture with the numbers drawn on it (looked at only when the list is not enough).
+see() {
+    local marks="$STATE/shots/see-$(date +%H%M%S).png"
+    ls -t "$STATE"/shots/*.png 2>/dev/null | tail -n +30 | xargs rm -f 2>/dev/null
+    see_build "$marks" || return $?
+    # Drawn before the list is printed: a reader that stops early (| head) ends desk with SIGPIPE.
+    scan_focus "읽은 요소 $(wc -l <"$STATE/elements.tsv" | tr -d ' ')개" <"$STATE/elements.tsv"
+    echo "→ $(window_title) · 요소 $(wc -l <"$STATE/elements.tsv" | tr -d ' ')개 (번호 · 중심 클릭 좌표 · 종류 · 이름 · 출처 A손쉬운사용/O글자/D검출/C그림설명)"
+    see_notes
+    fmt_elements <"$STATE/elements.tsv"
+    echo "그림: $marks (번호 상자: 파랑=손쉬운 사용, 분홍=검출만)"
+}
+
+
+# Types, then checks the text is now on the front window (its last word, by OCR); stops when it
+# is not, since a field that ignored the input (or got something else) must not be built on.
+typed() {
+    local mode=paste
+    [ "$1" = "--keys" ] && { mode=keys; shift; }
+    local text="$1"
+    guard_keys || return 1
+    focus_still || return 6
+    local field; field=$("$BIN" focused | cut -f3)
+    [ -n "$field" ] && printf '%s\ttarget\t\n' "$field" | focus target "입력: $text" 3
+    if [ "$mode" = keys ]; then "$BIN" typekeys "$text" || return $?; else "$BIN" type "$text" || return $?; fi
+    local token
+    token=$(LC_ALL=en_US.UTF-8 python3 -I -c 'import sys; w=sys.argv[1].split(); print(w[-1][-10:] if w else "")' "$text")
+    if [ "$(LC_ALL=en_US.UTF-8 printf '%s' "$token" | wc -m | tr -d ' ')" -lt 2 ]; then return 0; fi
+    # A number field may show what was typed with thousands commas (홈택스: 10000 shows as 10,000).
+    local grouped=""
+    [[ "$token" =~ ^[0-9]{4,}$ ]] && grouped=$(python3 -I -c 'import sys; print(f"{int(sys.argv[1]):,}")' "$token")
+    for _ in 1 2 3; do
+        sleep 0.3
+        if [ -n "$(search_text "$token")" ]; then return 0; fi
+        if [ -n "$grouped" ] && [ "$grouped" != "$token" ] && [ -n "$(search_text "$grouped")" ]; then return 0; fi
+    done
+    echo "desk: 입력 확인 실패 — 맨 앞 창에 '$token'이(가) 안 보임. 포커스·막는 창을 desk shot으로 보고, 클립보드가 안 먹는 창이면 desk type --keys" >&2
+    return 1
+}
+
+# Waits until the front window stops changing (two equal captures in a row, at most about 4 s).
+settle() {
+    local region prev="" cur tok f="$STATE/settle-$$.png"
+    CAPTURE_WINDOW=$("$BIN" window)
+    CAPTURE_INPUT=$(cat "$STATE/user-input" 2>/dev/null)
+    region=$(window_region)
+    tok=$(hide_focus)  # one hide for the whole wait: drawing between captures would never settle
+    sleep 0.25
+    for _ in $(seq 1 15); do
+        screencapture -x -R "$region" "$f" 2>/dev/null
+        cur=$(md5 -q "$f" 2>/dev/null)
+        [ -n "$prev" ] && [ "$cur" = "$prev" ] && break
+        prev="$cur"
+        sleep 0.12
+    done
+    # The last capture is the settled screen: the read that follows uses it (see_build).
+    mv -f "$f" "$STATE/settled.png" 2>/dev/null && printf '%s' "$region" >"$STATE/settled-region"
+    rm -f "$tok"
+}
+
+# After an action: which window is in front now, and the elements that appeared in it since the AI
+# last looked (already-seen names are left out). "바뀐 것 없음" means the action likely did nothing.
+look() {
+    [ "$QUIET" = 1 ] && return 0
+    settle
+    local before="$STATE/seen.before" new count
+    if [ -f "$STATE/seen" ]; then cp "$STATE/seen" "$before"; else : >"$before"; fi
+    see_build "" later || return $?
+    echo "→ $(window_title)"
+    see_notes
+    new=$(awk -F'\t' 'FILENAME==ARGV[1]{seen[$0]=1; next} $4!="" && !($4 in seen)' "$before" "$STATE/elements.tsv")
+    if [ -z "$new" ]; then focus_note "바뀐 것 없음"; echo "  (바뀐 것 없음)"; return 0; fi
+    count=$(printf '%s\n' "$new" | wc -l | tr -d ' ')
+    printf '%s\n' "$new" | scan_focus "새로 나타난 것 ${count}개"
+    if [ "$count" -gt 40 ]; then  # mostly a new screen: a long dump costs more than it tells
+        echo "  (새 화면: 새 요소 ${count}개 — 전체는 desk see, 찾을 것은 click-text)"
+        printf '%s\n' "$new" | awk -F'\t' '$3!="글자"' | head -n 15 | fmt_elements
+    else
+        printf '%s\n' "$new" | fmt_elements
+    fi
+    return 0
+}
+
+# Runs an action, then reports what it changed.
+then_look() { "$@" || return $?; look; }
+
+# Finds an element by name (accessibility name, OCR text) and clicks it. Exact names first; among
+# several, a control beats plain text; still several: lists them with numbers and fails.
+
+# ── pressing elements, and what to do when a press does nothing ────────────────────────────────────
+# A press that changes nothing (click_effect) is remembered for the window it was in ($STATE/inert),
+# so searches skip it: "검은색" the wallpaper's name was pressed while the swatch "검은색" was below.
+# Kept by name, kind and column (x / 20), not by box: scrolling moves it and detection jitters by 1 pt.
+
+inert_key() { awk -F'\t' '{ split($2, c, ","); printf "%s\t%s\t%d\n", $4, $3, int(c[1] / 20) }'; }
+
+remember_inert() { printf '%s\t%s\n' "$(window_title)" "$(inert_key <<<"$1")" >>"$STATE/inert"; }
+
+skip_inert() {  # element lines on stdin, minus those found dead in this window
+    if [ -s "$STATE/inert" ]; then
+        awk -F'\t' -v w="$(window_title)" 'FILENAME == ARGV[1] { if ($1 == w) dead[$2 "\t" $3 "\t" $4] = 1; next }
+            { split($2, c, ","); if (!(($4 "\t" $3 "\t" int(c[1] / 20)) in dead)) print }' "$STATE/inert" -
+    else
+        cat
+    fi
+}
+
+# A control the app itself reports (a button, a swatch, a switch): a press on it that changes nothing
+# means it is most likely already in that state — searching on for another one does not help.
+is_control() { awk -F'\t' '{ exit !(index($5, "A") && $3 != "글자" && $3 != "상자") }' <<<"$1"; }
+already_so() {
+    echo "desk: '$(cut -f4 <<<"$1")'은(는) 앱이 알려 준 컨트롤인데 눌러도 그대로임 — 이미 그 상태일 가능성이 큼. 결과가 보이는 곳(미리보기·값)을 확인할 것" >&2
+    focus_note "이미 그 상태로 보임: $(cut -f4 <<<"$1")" miss
+}
+
+find_hits() {  # elements named NEEDLE: exact names, else names containing it
+    local hits
+    hits=$(awk -F'\t' -v t="$1" -v dash="$NAME_DASH" -v nbsp="$NAME_NBSP" "$NAME_AWK"'
+        BEGIN { t = norm(t) } $4 == t || norm($4) == t || bare($4) == t' "$STATE/elements.tsv" | drop_pane 2 | skip_inert)
+    [ -n "$hits" ] || hits=$(awk -F'\t' -v t="$1" -v dash="$NAME_DASH" -v nbsp="$NAME_NBSP" "$NAME_AWK"'
+        BEGIN { t = norm(t) } index(norm($4), t)' "$STATE/elements.tsv" | drop_pane 2 | skip_inert)
+    printf '%s' "$hits"
+}
+
+only_one() { [ -n "$1" ] && [ "$(printf '%s\n' "$1" | wc -l | tr -d ' ')" = 1 ]; }
+
+# One of the hits: the Nth, the only one, the only control, the only one the app reports, the only one a
+# click can press; still several: lists them (exit 1) for the AI to pick by number.
+choose_hit() {  # choose_hit NEEDLE HITS [N]
+    local needle="$1" hits="$2" nth="${3:-}" n pick l xy
+    n=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+    if [ -n "$nth" ]; then
+        pick=$(printf '%s\n' "$hits" | sed -n "${nth}p")
+        [ -n "$pick" ] || { echo "desk: '$needle'은(는) ${n}개뿐" >&2; return 1; }
+        printf '%s' "$pick"; return 0
+    fi
+    only_one "$hits" && { printf '%s' "$hits"; return 0; }
+    pick=$(printf '%s\n' "$hits" | awk -F'\t' '$3 != "글자"'); only_one "$pick" && { printf '%s' "$pick"; return 0; }
+    pick=$(printf '%s\n' "$hits" | awk -F'\t' 'index($5, "A")'); only_one "$pick" && { printf '%s' "$pick"; return 0; }
+    pick=$(printf '%s\n' "$hits" | while IFS= read -r l; do
+        xy=$(cut -f2 <<<"$l")
+        [ "$("$BIN" hit "${xy%,*}" "${xy#*,}" | cut -f1)" = pressable ] && printf '%s\n' "$l"
+    done)
+    only_one "$pick" && { printf '%s' "$pick"; return 0; }
+    printf '%s\n' "$hits" | awk -F'\t' '{ printf "%s\tcand\t%s\n", $6, $4 }' | focus target "'$needle' ${n}곳 — 어느 것인지 판단 중" 4
+    echo "AMBIGUOUS: '$needle' ${n}곳 — desk click-el 번호 로 고르기" >&2
+    printf '%s\n' "$hits" | fmt_elements >&2
+    return 1
+}
+
+# Presses one element line (others in CANDS are drawn as candidates) and checks it did something.
+# 0 = it responded, 3 = stopped, 5 = nothing happened (or plain text: not pressed); remembered.
+press_line() {  # press_line LINE [CANDS]
+    local line="$1" cands="${2:-}" xy box name what
+    xy=$(cut -f2 <<<"$line"); box=$(cut -f6 <<<"$line"); name=$(cut -f4 <<<"$line")
+    guard_point "${xy%,*}" "${xy#*,}" || return 1
+    what=$("$BIN" hit "${xy%,*}" "${xy#*,}")
+    if [ "${what%%$'\t'*}" = inert ] && [ "${FORCE:-}" != 1 ]; then
+        echo "desk: '$name'($xy)은 누를 수 없는 ${what#*$'\t'}(글자·그림)라 누르지 않음" >&2
+        remember_inert "$line"
+        return 5
+    fi
+    printf '%s\n' "$line" | fmt_elements
+    prepare_click "${xy%,*}" "${xy#*,}" "$box" || return $?
+    echo "$(date '+%F %T') 클릭: $name ($xy)" >>"$LOG"
+    "$BIN" guarded-press "${xy%,*}" "${xy#*,}" left "$CLICK_DELAY" "$name" || return $?
+    click_effect && return 0
+    echo "desk: '$name'($xy)을 눌렀지만 아무것도 바뀌지 않음 — 글자·라벨·그림이었거나 이미 그 상태" >&2
+    remember_inert "$line"
+    return 5
+}
+
+# A press that changed nothing: the other elements of that name on screen, for the AI to pick from (desk
+# no longer presses one of them, or scrolls looking for one, by itself — the AI judges).
+others_named() {  # others_named LINE
+    local name; name=$(cut -f4 <<<"$1" | sed 's/^(옆 글자) //; s/ \[[^]]*\]$//')
+    case "$name" in "" | "(그림)"*) return 0 ;; esac
+    local others; others=$(find_hits "$name" | awk -F'\t' -v n="$(cut -f1 <<<"$1")" '$1 != n')
+    [ -z "$others" ] || { echo "같은 이름의 다른 요소 (누를 것이면 click-el 번호):" >&2; printf '%s\n' "$others" | fmt_elements >&2; }
+}
+
+# --force permits inert-looking targets, never stale screen evidence.
+click_el() {
+    local n="$1" line rc
+    [ "${2:-}" = --force ] && FORCE=1
+    [ -f "$STATE/elements.tsv" ] || { echo "desk: 요소 목록이 없음 — desk see 먼저" >&2; return 1; }
+    line=$(awk -F'\t' -v n="$n" '$1 == n' "$STATE/elements.tsv")
+    [ -n "$line" ] || { echo "desk: 요소 $n 없음" >&2; return 1; }
+    [ "$USER_MOVED" != 1 ] || { echo 'desk: 사용자가 개입해 요소 번호를 사용하지 않음. desk see로 다시 볼 것' >&2; return 6; }
+    press_line "$line"; rc=$?
+    [ "$rc" = 5 ] || return $rc
+    if is_control "$line"; then already_so "$line"; return 5; fi
+    others_named "$line"
+    return 5
+}
+
+click_text() {
+    local needle="$1" nth="" hits line rc
+    shift
+    for a in "$@"; do [ "$a" = --force ] && FORCE=1 || nth="$a"; done
+    see_build "" later || return $?
+    hits=$(find_hits "$needle")
+    if [ -z "$hits" ]; then
+        focus_note "못 찾음: $needle" miss
+        echo "NOT_FOUND: '$needle' — 맨 앞 창의 보이는 영역에 없음 (가려졌거나 스크롤 밖일 수 있음)" >&2
+        return 1
+    fi
+    line=$(choose_hit "$needle" "$hits" "$nth") || return 1
+    press_line "$line" "$hits"; rc=$?
+    [ "$rc" = 5 ] || return $rc
+    if is_control "$line"; then already_so "$line"; return 5; fi
+    others_named "$line"
+    return 5
+}
+
+# Brings an app to the front (launching it if needed), visibly.
+activate() {
+    open -a "$1" || die "앱을 열 수 없음: $1"
+    # The shown name may be localized (TextEdit is "텍스트 편집기"), so the bundle's file name counts too.
+    local want i; want=$(printf '%s' "${1%.app}" | tr '[:upper:]' '[:lower:]')
+    for i in $(seq 1 30); do
+        [ "$("$BIN" front)" = "$1" ] && return 0
+        [ "$(basename "$("$BIN" frontpath)" .app | tr '[:upper:]' '[:lower:]')" = "$want" ] && return 0
+        # Seen twice from a terminal in front: the first open left it behind, a second one at once
+        # brought it forward (cause not found). Launching and switching apps this way is allowed.
+        [ "$i" = 10 ] && osascript -e "tell application \"$1\" to activate" >/dev/null 2>&1
+        sleep 0.1
+    done
+    echo "desk: '$1'이(가) 맨 앞으로 오지 않음 (지금: $("$BIN" front))" >&2
+    return 1
+}
+
+el_name() { [ -f "$STATE/elements.tsv" ] && awk -F'\t' -v n="$1" '$1==n { print $4 " (" $3 ")" }' "$STATE/elements.tsv"; }
+
+short() { local s="$*"; [ ${#s} -gt 60 ] && s="${s:0:57}…"; printf '%s' "$s"; }
+
+QUIET=0
+[ "${1:-}" = "-q" ] && { QUIET=1; shift; }
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+    permissions)
+        build
+        permission_report "$@"
+        ;;
+    doctor)
+        build
+        echo "platform: macOS $(sw_vers -productVersion)"
+        echo "native: $BIN"
+        echo "state: $STATE"
+        echo "front: $(helper front)"
+        permission_report
+        [ -f "$STATE/omni/weights/icon_detect_v3/model.pt" ] && echo 'detector weights: installed' || echo 'detector weights: missing (SKILL.md)'
+        [ -x "$LLM/bin/python" ] && echo 'local vision: MLX runtime installed' || echo 'local vision: not installed'
+        overlay_running && echo 'panel: on' || echo 'panel: off'
+        ;;
+    begin)
+        rm -f "$STATE/stopped" "$STATE"/running/*
+        rm -f "$STATE/observation.json" "$STATE/click-plan.json" "$STATE/click-guard.json" "$STATE"/hiding/click-*
+        build
+        permission_warnings
+        ensure_click_runtime || die '클릭 검증용 로컬 Pillow 환경을 준비하지 못했습니다'
+        touch "$STATE/last"
+        rm -f "$STATE/focus" "$STATE/inert" "$STATE/expect" "$STATE/target-pid"
+        echo "$(date '+%F %T') ── begin${1:+ $1}" >>"$LOG"
+        ensure_overlay
+        start_detector || echo "검출기 없음(설치: SKILL.md 실행 환경) — OCR·손쉬운 사용 정보만 씀"
+        if [ -f "$STATE/esc-unavailable" ]; then
+            echo "제어 시작. 중지: 화면 하단 버튼 (ESC 감지는 이 터미널 앱의 손쉬운 사용 권한이 없어 꺼짐)"
+        else
+            echo "제어 시작. 중지: 화면 하단 버튼 또는 ESC 한 번"
+        fi ;;
+    end)
+        if overlay_running; then
+            desk_ending_pid=$(cat "$STATE/overlay.pid")
+            kill "$desk_ending_pid"
+            for desk_end_tick in $(seq 1 20); do kill -0 "$desk_ending_pid" 2>/dev/null || break; sleep 0.05; done
+        fi
+        rm -f "$STATE/last" "$STATE/observation.json"
+        echo "$(date '+%F %T') ── end" >>"$LOG"
+        echo "제어 끝" ;;
+    stop)
+        echo "desk stop $(date)" >"$STATE/stopped"
+        for f in "$STATE"/running/*; do [ -e "$f" ] && kill "$(basename "$f")" 2>/dev/null; done
+        echo "중지함" ;;
+    status)
+        if [ -f "$STATE/stopped" ]; then echo "stopped: $(cat "$STATE/stopped")"; else echo "not stopped"; fi
+        overlay_running && echo "panel: on" || echo "panel: off" ;;
+    log) tail -n "${1:-30}" "$LOG" ;;
+    say)
+        [ $# -ge 1 ] || die "desk say '지금 하는 일'"
+        check_stopped
+        touch "$STATE/last"
+        echo "$(date '+%F %T') 설명: $*" >>"$LOG" ;;
+    handoff)
+        # The user's turn in the app itself (a password, an identity check). Done when the user has typed
+        # or clicked and then been still HANDOFF_IDLE seconds — whether it worked is the AI's to see next.
+        # (A text to wait for misled twice: the AI's own words in its terminal, a login dialog hidden by
+        # another tab.) The panel has no input line; a question for the user goes to the terminal.
+        [ $# -ge 1 ] || die "desk handoff '안내' [초]"
+        check_stopped
+        build; ensure_overlay
+        echo "$(date '+%F %T') 🙋 사용자 차례: $1" >>"$LOG"
+        limit="${2:-180}"; start=$(date +%s); began=""
+        while [ $(($(date +%s) - start)) -lt "$limit" ]; do
+            check_stopped
+            touch "$STATE/last"
+            if [ -z "$began" ] && [ -f "$STATE/user-input" ] && [ "$(stat -f %m "$STATE/user-input")" -ge "$start" ]; then
+                began=1
+                echo "$(date '+%F %T') 사용자 입력 시작 · 멈추면 ${HANDOFF_IDLE}초 뒤 이어감" >>"$LOG"
+            fi
+            if [ -n "$began" ] && [ "$(user_input_age)" -ge "$HANDOFF_IDLE" ]; then
+                echo "$(date '+%F %T') 사용자 입력 멈춤 · 화면 다시 보고 이어감" >>"$LOG"
+                echo "사용자가 입력하고 ${HANDOFF_IDLE}초 멈춤 — desk see로 결과를 보고 판단할 것"
+                exit 0
+            fi
+            sleep 0.5
+        done
+        echo "desk: ${limit}초 동안 사용자 입력이 $([ -n "$began" ] && echo '멈추지 않음' || echo '없음') — 터미널로 사용자에게 물을 것" >&2; exit 1 ;;
+    shot) if [ $# -eq 0 ]; then act "화면 보는 중 · $(helper front)" see; else act "화면 보는 중 · $(helper front)" shot "$@"; fi ;;
+    see) act "화면 보는 중 · $(helper front)" see ;;
+    ask) act "자세히 보는 중 · $(helper front)" ask "$@" ;;
+    ask-ref) [ $# -ge 2 ] || die "desk ask-ref 질문ID '답'"; ask_py ref "$ASK" "$@" && echo "기록함" ;;
+    ask-report) ask_py report "$ASK" "$@" ;;
+    click-el) GUARD=1; [ $# -ge 1 ] || die "desk click-el 번호"; act "누르는 중: $(short "$(el_name "$1")") · $(helper front)" then_look click_el "$@" ;;
+    read) act "화면 글자 읽는 중" read_screen "$@" ;;
+    find) [ $# -ge 1 ] || die "desk find '글자' [--full]"; act "글자 찾는 중: $(short "$1")" find_text "$@" ;;
+    wait-for) [ $# -ge 1 ] || die "desk wait-for '글자' [초] [--gone]"; act "기다리는 중: $(short "$1")" wait_for "$@" ;;
+    click-text) GUARD=1; [ $# -ge 1 ] || die "desk click-text '글자' [N]"; act "'$(short "$1")' 찾아서 누르는 중 · $(helper front)" then_look click_text "$@" ;;
+    look) act "화면 보는 중" look ;;
+    click|dclick|rclick)
+        GUARD=1
+        [ "${3:-}" = --force ] && FORCE=1
+        [ $# -ge 2 ] || die "desk $cmd X Y [--force]"
+        mode=left; name="클릭"
+        [ "$cmd" = dclick ] && { mode=double; name="더블클릭"; }
+        [ "$cmd" = rclick ] && { mode=right; name="오른쪽 클릭"; }
+        act "$name ($1, $2) · $(helper front)" then_look guarded_at_click "$1" "$2" "$mode" ;;
+    move) act "마우스 이동 ($1, $2)" helper move "$@" ;;
+    drag) GUARD=1; act "끌기 ($1, $2) → ($3, $4)" then_look guarded_drag "$@" ;;
+    scroll) GUARD=1; act "스크롤 ${3:-} ${4:-5} ($1, $2)" then_look guarded_scroll "$@" ;;
+    key)
+        GUARD=1
+        [ $# -ge 1 ] || die "desk key COMBO"
+        set -- "${1//primary/cmd}" "${2:-15}"
+        label="키 $1 (${2}ms) · $(helper front)"
+        case "$1" in cmd+c) label="복사 (cmd+c) · $(helper front)" ;; cmd+v) label="붙여넣기 (cmd+v) · $(helper front)" ;;
+                     cmd+x) label="잘라내기 (cmd+x) · $(helper front)" ;; esac
+        act "$label" then_look guarded_keys helper key "$1" "$2" ;;
+    type) GUARD=1; [ $# -ge 1 ] || die "desk type [--keys] '텍스트'"; act "입력하는 중: $(short "${@: -1}") · $(helper front)" typed "$@" ;;
+    front) window_title ;;
+    open)
+        [ $# -ge 1 ] || die "desk open 앱이름|URL|파일"
+        if [ -e "$1" ] || [[ "$1" == *://* ]]; then act "열기: $(short "$1")" then_look open "$@"
+        else act "앱 열기: $1" then_look activate "$1"; fi ;;
+    wait) act "대기 ${1:-1}초" sleep "${1:-1}" ;;
+    help|*)
+        cat <<'EOF'
+desk begin ['요청 요약']         제어 세션 시작 (하단 패널 표시, 이전 중지 해제) — 요청마다 한 번
+desk end                        제어 세션 끝 (패널 닫기)
+desk status | stop | log [N]    상태 / 사용자 대신 중지 / 지금까지 한 동작 기록
+desk permissions [--request]    이 터미널 앱의 손쉬운 사용·화면 기록 권한 확인 (--request: 시스템 승인 창 띄우기)
+desk say '지금 하는 일'          동작 기록에 지금 하는 일을 한 줄 남김 ("메일에서 금액 찾는 중", "제출 버튼 누를 차례").
+                                패널은 기록의 최근 두 줄을 보인다(새 줄이 아래)
+desk handoff '안내' [초]         사용자가 앱에 직접 할 차례(비밀번호·본인인증): 기록에 안내를 남기고, 사용자가
+                                입력하다 10초 멈추면 끝남(기본 180초, 입력이 없으면 종료 코드 1). 결과는 see로 판단
+── 보기 (화면에 보이는 것만. 판단용은 OCR·손쉬운 사용 정보·검출기 셋을 합친 요소 목록)
+desk see                        맨 앞 창의 요소 목록 "번호 · 중심 좌표 · 종류 · 이름 · [출처 A/O/D]" + 번호 그림 경로
+desk shot                       = desk see (그림을 볼 때). --region x,y,w,h / --full / 경로 → 좌표 눈금 그림
+desk ask --region x,y,w,h --type 글자|숫자|선택|색|창|그림 '질문'
+                                그 영역을 그림으로 볼 때(shot --region 대신): 같은 눈금 그림 + 질문 ID. 직접 본 답을
+                                desk ask-ref ID '답'으로 남긴다. 로컬 비전 모델이 같은 그림에 따로 답해 비교만 한다
+desk ask-report [--list]        로컬 답과 직접 본 답의 비교 집계 (--list: 엇갈린 것)
+desk find '글자' [--full]        맨 앞 창의 그 글자 클릭 좌표 (OCR + 손쉬운 사용 이름. --full: 전체 화면 OCR)
+desk wait-for '글자' [초] [--gone] [--full]  나올 때까지(--gone: 사라질 때까지) 확인 (find와 같은 검색, 기본 15초)
+desk read [--window | --region x,y,w,h]   글자 전부: "x,y<TAB>글자" 줄들 (기본 전체 화면)
+desk look                       맨 앞 창 제목 + 마지막으로 본 뒤 새로 나타난 요소
+desk front                      맨 앞 앱 · 창 제목
+── 조작 (모두 화면에 보이게. click·click-el·click-text·key·scroll·drag·open은 끝나면 화면이 멈출 때까지
+   기다렸다가 "→ 앱 · 창 제목"과 새로 나타난 요소(번호 포함)를 출력한다. -q를 앞에 붙이면 생략)
+desk click-text '이름' [N]       요소 목록에서 이름으로 찾아 클릭 (여러 곳이면 번호 목록을 보이고 실패)
+desk click-el 번호               마지막 요소 목록(see·look·click-text)의 그 번호를 클릭
+   클릭 뒤 화면이 그대로면 종료 코드 5와 같은 이름의 다른 요소 목록을 보인다(대신 누르거나 스크롤하지 않는다).
+   누를 수 없는 글자로 확실하면 누르지 않는다(--force로 강제)
+desk open 앱이름|URL|파일        앱을 맨 앞으로 (없으면 실행), URL은 기본 브라우저
+desk click|dclick|rclick X Y    클릭 / 더블클릭 / 오른쪽 클릭 (포인트 좌표)
+desk move X Y | drag X1 Y1 X2 Y2
+desk scroll X Y up|down|left|right [N|page]   N줄, page = 창 높이(좌우는 너비)의 85%만큼 한 번에
+desk key COMBO [HOLD_MS]        return, esc, tab, cmd+c, cmd+l, cmd+shift+t, down …
+                                macOS: cmd 단독 탭 / cmd,cmd 두 번 탭도 지원
+                                macOS 단일 키 길게 누르기: desk key f 1000 (15~2000ms, 중지·사용자 개입 시 keyup 후 취소)
+desk type [--keys] "텍스트"      입력 후 화면에 보이는지 확인 (안 보이면 종료 코드 1). 기본은 클립보드
+                                경유(한글 입력기와 무관), --keys는 글자를 실은 키 이벤트(클립보드가 안 먹는 창)
+desk wait SEC
+desk -q 명령 …                  조작 뒤 화면 보고를 생략 (확실한 중간 단계를 묶을 때)
+맨 앞이 에이전트 자신의 터미널이면 찾기·입력은 모두 거부된다(대상 앱을 desk open으로 먼저 앞으로)
+종료 코드 1 = 못 찾음/모호함 (&&로 묶으면 거기서 멈춘다), 3 = 사용자가 중지함: 즉시 멈추고 보고할 것,
+5 = 눌렀지만 아무것도 바뀌지 않음(글자·라벨을 눌렀거나 이미 그 상태): 같이 나온 후보나 desk see·shot으로 판단할 것,
+6 = 마지막으로 본 뒤 창이 바뀜(사용자가 다른 창을 띄우거나 옮김): 하지 않았다. desk see로 다시 보고, 사용자 개입이면 물을 것
+사용자가 키·마우스를 쓰면 화면 읽기·동작 모두 사용자가 멈추고 5초 뒤에 하고, 그사이 창·포커스·누를 요소가
+바뀌었으면 하지 않고 종료 코드 6 (DESK_USER_IDLE로 초 조절)
+EOF
+        ;;
+esac

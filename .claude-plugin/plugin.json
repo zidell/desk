@@ -1,0 +1,14 @@
+{
+  "name": "desk",
+  "version": "0.1.0",
+  "description": "macOS·Windows·Linux 화면을 로컬 OCR·접근성 정보·아이콘 검출로 읽고, 보이는 마우스와 키보드로 앱·웹 업무를 수행하는 스킬",
+  "author": {
+    "name": "zidell",
+    "url": "https://github.com/zidell"
+  },
+  "homepage": "https://github.com/zidell/desk-skill",
+  "repository": "https://github.com/zidell/desk-skill",
+  "license": "MIT",
+  "keywords": ["computer-use", "desktop", "automation", "ocr", "accessibility", "macos", "windows", "linux"],
+  "skills": "./skills/"
+}

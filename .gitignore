@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+# 실행 파일·venv·모델·로그·스크린샷은 ~/.cache/desk(DESK_STATE)에 두며 레포에 넣지 않는다
+build/
+*.exe
