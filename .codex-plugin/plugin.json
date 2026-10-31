@@ -1,0 +1,13 @@
+{
+  "name": "desk",
+  "version": "0.4.0",
+  "description": "macOS·Windows·Linux에서 화면을 읽고 보이는 마우스와 키보드로 작업하는 데스크톱 제어 플러그인",
+  "skills": "./skills/",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "desk",
+    "shortDescription": "화면을 보고 마우스와 키보드로 작업합니다",
+    "developerName": "zidell",
+    "category": "Productivity"
+  }
+}

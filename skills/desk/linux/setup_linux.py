@@ -59,7 +59,7 @@ def install():
     # A copied or synced skill folder may lose executable permission. The wrapper calls Python explicitly.
     import shlex
     root=stable_root()
-    text="#!/bin/sh\nexec /usr/bin/python3 "+shlex.quote(str(root/"desk.py"))+ ' "$@"\n'
+    text="#!/bin/sh\nexec /usr/bin/python3 "+shlex.quote(str(Path.home()/".agents/skills/desk/desk.py"))+ ' "$@"\n'
     if launcher.is_symlink() or launcher.exists():
         old=launcher.read_text(errors="replace") if launcher.is_file() else ""
         # Only an earlier desk launcher (another clone, a moved folder) is replaced.
@@ -83,7 +83,7 @@ def install_status():
     """doctor lines: is the launcher and every skill link pointing at this folder?"""
     launcher=Path.home()/".local"/"bin"/"desk"
     lines=[];root=stable_root()
-    ok=launcher.is_file() and str(root/"desk.py") in launcher.read_text(errors="replace")
+    ok=launcher.is_file() and str(Path.home()/".agents/skills/desk/desk.py") in launcher.read_text(errors="replace")
     lines.append("launcher: "+(str(launcher) if ok else "missing or another folder → desk.py install"))
     for target in skill_links():
         good=target.resolve()==root.resolve() if target.exists() else False

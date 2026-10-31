@@ -120,10 +120,25 @@ def plugin(root):
     parts = root.parts
     for i in range(len(parts) - 4):
         if parts[i:i+2] == ("plugins", "cache"):
+            if plugin_host(root) == "codex":
+                return parts[i+2], root
             stable = Path(*parts[:i+1]) / "marketplaces" / parts[i+2] / Path(*parts[i+5:])
             return parts[i+2], stable
         if parts[i:i+2] == ("plugins", "marketplaces"):
             return parts[i+2], root
+    return None
+
+
+def plugin_host(root):
+    """Support default and explicitly configured Codex homes, including tests."""
+    parts = root.parts
+    for i in range(len(parts) - 2):
+        if parts[i:i+2] in (("plugins", "cache"), ("plugins", "marketplaces")):
+            home = Path(*parts[:i])
+            codex = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).resolve()
+            if home.resolve() == codex or home.name == ".codex" or (home / "config.toml").is_file():
+                return "codex"
+            return "claude"
     return None
 
 
@@ -303,11 +318,72 @@ def plugin_metadata(root, latest):
 
 
 def plugin_update(root, latest):
+    if plugin_host(root) == "codex":
+        return codex_update(root, latest), False
     _, stable = plugin(root)
     # Patch the stable runtime first. CLI failure must not undo a runtime patch
     # or tamper with Claude's managed cache.
     git_update(stable, latest)
     return stable, not plugin_metadata(stable, latest)
+
+
+def refresh_plugin_links(previous, current):
+    """Move only installer-owned links; never rebuild a running Windows launcher."""
+    paths = {Path.home() / folder / "desk" for folder in
+             (".codex/skills", ".agents/skills", ".claude/skills")}
+    for link in paths:
+        try:
+            original = os.readlink(link)
+        except OSError:
+            continue
+        if link.resolve() != previous.resolve():
+            continue
+
+        def create(target):
+            if sys.platform == "win32" and not link.is_symlink():
+                run(["cmd", "/c", "mklink", "/J", link, target])
+            else:
+                link.symlink_to(target, target_is_directory=True)
+
+        if sys.platform == "win32" and not link.is_symlink():
+            os.rmdir(link)
+        else:
+            link.unlink()
+        try:
+            create(current)
+        except BaseException:
+            create(original)
+            raise
+
+
+def codex_update(root, latest):
+    marketplace, _ = plugin(root)
+    executable = shutil.which("codex")
+    if not executable:
+        raise Deferred("Codex 플러그인 갱신에는 codex 명령이 필요합니다")
+    if not matches(root, release_files((root / "VERSION").read_text().strip())):
+        raise Deferred("Codex 플러그인에 로컬 변경이 있어 자동 패치를 보류합니다")
+    entries = json.loads(run([executable, "plugin", "list", "--marketplace", marketplace, "--json"]))
+    selected = [p for p in entries.get("installed", []) if p.get("pluginId") == "desk@" + marketplace]
+    if len(selected) != 1:
+        raise Deferred("Codex 플러그인 설치를 확인하지 못했습니다")
+    source = selected[0].get("marketplaceSource", {})
+    origin = source.get("source", "").rstrip("/").removesuffix(".git")
+    if source.get("sourceType") != "git" or origin not in (
+            REPO.removesuffix(".git"), "zidell/desk-skill", "git@github.com:zidell/desk-skill"):
+        raise Deferred("로컬 마켓플레이스 또는 fork는 자동으로 바꾸지 않습니다")
+    run([executable, "plugin", "marketplace", "upgrade", marketplace, "--json"], timeout=60)
+    installed = json.loads(run([executable, "plugin", "add", "desk@" + marketplace, "--json"], timeout=60))
+    if installed.get("pluginId") != "desk@" + marketplace or version(installed.get("version", "")) < version(latest):
+        raise Deferred("Codex 플러그인이 새 버전을 반영하지 않았습니다")
+    cache = Path(installed["installedPath"])
+    current = cache / "skills" / "desk"
+    number = (current / "VERSION").read_text().strip()
+    if number != installed["version"] or load(cache / ".codex-plugin/plugin.json").get("version") != number:
+        raise Deferred("Codex 플러그인 캐시 검증 실패")
+    refresh_plugin_links(root, current)
+    print("desk: 플러그인 지침 갱신은 Codex의 새 대화에서 반영됩니다", flush=True)
+    return current
 
 
 def prepare(root, state, record, force=False):
@@ -361,7 +437,15 @@ def bootstrap(root, args):
     # invocation from an old plugin cache uses that same runtime, too.
     if source and (source[1] / "desk.py").is_file():
         root = source[1].resolve()
-    key = hashlib.sha256(str(root).encode()).hexdigest()[:20]
+    identity = root
+    if plugin_host(root) == "codex":
+        # Versions share the same lock/throttle, even while the host replaces its cache.
+        parts = root.parts
+        for i in range(len(parts) - 4):
+            if parts[i:i+2] == ("plugins", "cache"):
+                identity = Path(*parts[:i+4])
+                break
+    key = hashlib.sha256(str(identity).encode()).hexdigest()[:20]
     directory = Path.home() / ".cache" / "desk" / "updates" / key
     force = (args[1] if args[0] == "-q" and len(args) > 1 else args[0]) == "update"
     with lock(directory / "lock"):

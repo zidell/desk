@@ -8,7 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 command = sys.argv[2] if sys.argv[1:2] == ["-q"] and len(sys.argv) > 2 else (sys.argv[1] if len(sys.argv) > 1 else "")
 if command in ("begin", "update") and os.environ.get("DESK_UPDATE_READY") != str(ROOT):
-    os.execv(sys.executable, [sys.executable, "-X", "utf8", str(ROOT / "desk-update.py"), "bootstrap", str(ROOT), *sys.argv[1:]])
+    updater = [sys.executable, "-X", "utf8", str(ROOT / "desk-update.py"), "bootstrap", str(ROOT), *sys.argv[1:]]
+    if sys.platform == "win32":
+        raise SystemExit(subprocess.call(updater))
+    os.execv(sys.executable, updater)
 if sys.platform == "win32":
     state = Path(os.environ.get("DESK_STATE", Path.home() / ".cache" / "desk"))
     runtime = state / "windows" / "Scripts" / "python.exe"

@@ -1,0 +1,20 @@
+{
+  "name": "desk-skill",
+  "interface": {
+    "displayName": "desk"
+  },
+  "plugins": [
+    {
+      "name": "desk",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

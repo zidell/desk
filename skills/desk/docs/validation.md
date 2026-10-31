@@ -13,6 +13,7 @@ OS별로 실제로 확인한 환경과 결과, 아직 확인하지 않은 조건
 | `desk.py install`: 실행기·스킬 링크 설치, 다른 곳을 가리키는 링크 교체, `doctor` 링크 상태 | 문법 검사, Linux에서 uname을 속여 임시 HOME으로 실행 | 문법 검사만 | 직접 실행(임시 HOME: 교체·재실행·실제 폴더 거부·`npx skills` 배치·실행 권한 없는 사본) |
 | 플러그인 설치 시 실행기·링크를 마켓플레이스 clone(고정 경로)으로 연결 | Linux에서 uname을 속여 실제 플러그인 설치본으로 실행 | 문법 검사만 | 직접 실행(임시 Claude 설정에 실제 플러그인 설치) |
 | 자동 패치(`desk-update.py`, begin 전 갱신·재실행·동시 잠금) | 직접 실행 — 공통 회귀 21개, 실제 실행기·Python 진입 `update`, `doctor`, 실제 GitHub ZIP 검증, 격리 Claude CLI 캐시·메타데이터 갱신 | 문법 검사만 — 실제 Windows 실행·디렉터리 잠금 검증 필요 | 문법 검사만 — 실제 Linux 세션 잠금·시작 검증 필요 |
+| Codex 플러그인 배포·호스트 CLI 갱신·고정 링크 실행기, Windows updater 종료 코드 보존 | 문법 검사만 — Bash `-n`, 실제 macOS 설치·갱신 필요 | 직접 실행 — 격리 Codex CLI 로컬·GitHub 마켓플레이스 설치, 공통 회귀 25개 중 24개 통과·macOS 전용 1개 제외, junction 이동·Windows 종료 코드·OS 잠금 확인 | 문법 검사만 — Linux 설치·세션 시작 재검증 필요 |
 
 ## macOS
 

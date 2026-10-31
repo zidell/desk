@@ -39,7 +39,7 @@ desk doctor
 사용자 캐시에 추출한다. 시스템에 개발 헤더가 있으면 그대로 쓴다.
 다른 배포판은 해당 배포판의 LayerShellQt 개발 패키지를 설치한다.
 
-실행기는 `~/.local/bin/desk`이며 스킬 폴더 파일이 실행 권한을 잃어도 Python으로 직접 호출한다.
+실행기는 `~/.local/bin/desk`이며 고정된 `~/.agents/skills/desk` 링크를 거쳐 Python으로 직접 호출한다. 스킬 폴더 파일이 실행 권한을 잃어도 동작한다. Codex 플러그인 갱신은 Codex CLI가 새 캐시를 설치한 뒤 링크만 바꾼다.
 `install`은 Claude Code·Codex·Agents 스킬 폴더의 `desk` 링크를 이 폴더로 맞추고, 다른 곳을 가리키던 링크는 교체한다. 링크가 아닌 파일·폴더는 건드리지 않는다.
 스킬 폴더에는 실행 파일·venv·모델·스크린샷·로그를 만들지 않는다.
 `DESK_STATE`는 세션 상태와 테스트 결과의 별도 로컬 경로다.

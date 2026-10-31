@@ -5,6 +5,7 @@
 ## 준비
 
 - `python3 <스킬 폴더>/desk.py install`(또는 `desk install`)이 `~/.local/bin/desk`·`desk-ssh` 실행기와 Claude Code·Codex·Agents 스킬 링크를 만든다. `~/.local/bin`이 PATH에 없으면 알려 준다. 셸 프로필은 바꾸지 않는다.
+- 두 실행기는 고정된 `~/.agents/skills/desk` 링크를 거친다. Codex 플러그인을 갱신할 때 Codex CLI가 새 캐시를 설치한 뒤 이 링크를 옮기므로 버전별 캐시 경로를 실행기에 고정하지 않는다.
 - Swift helper는 처음 실행할 때와 소스가 바뀌었을 때 `~/.cache/desk/desk-helper`로 빌드된다. Xcode Command Line Tools(`swiftc`)가 필요하다.
 - `begin`은 클릭 근거를 비교할 Pillow를 준비한다. `~/.cache/desk/omni` 환경이 있으면 쓰고, 없으면 `~/.cache/desk/evidence` venv를 만든다. 준비에 실패하면 클릭을 허용하지 않는다.
 

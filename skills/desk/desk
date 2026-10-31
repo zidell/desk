@@ -186,15 +186,15 @@ skill_targets() {
 install_desk() {
     local root t; root=$(stable_dir)
     mkdir -p "$HOME/.local/bin"
-    write_launcher desk "$root/desk"
-    write_launcher desk-ssh "$root/desk-ssh"
+    write_launcher desk "$HOME/.agents/skills/desk/desk"
+    write_launcher desk-ssh "$HOME/.agents/skills/desk/desk-ssh"
     while read -r t; do link_skill "$root" "$t"; done < <(skill_targets)
     echo "launcher: $HOME/.local/bin/desk"
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "PATH에 $HOME/.local/bin이 없습니다. 셸 설정에 추가하거나 $HOME/.local/bin/desk로 실행하세요" ;; esac
 }
 install_status() {
     local root t; root=$(stable_dir)
-    [ -f "$HOME/.local/bin/desk" ] && [ "$(cat "$HOME/.local/bin/desk")" = "$(launcher_text "$root/desk")" ] \
+    [ -f "$HOME/.local/bin/desk" ] && [ "$(cat "$HOME/.local/bin/desk")" = "$(launcher_text "$HOME/.agents/skills/desk/desk")" ] \
         && echo "launcher: $HOME/.local/bin/desk" || echo "launcher: missing or another folder → desk install"
     while read -r t; do
         same_dir "$t" "$root" && echo "skill link $t: ok" || echo "skill link $t: missing or another folder → desk install"

@@ -1,6 +1,6 @@
-# desk
+# desk — 데스크톱 제어 플러그인
 
-AI 코딩 에이전트(Claude Code, Codex 등)가 **사람이 보는 화면**을 읽고 **실제 마우스와 키보드**로 데스크톱 앱과 웹 업무를 하게 해 주는 스킬입니다. macOS·Windows·Linux를 하나의 `desk` 명령으로 다룹니다.
+AI 코딩 에이전트(Claude Code, Codex 등)가 **사람이 보는 화면**을 읽고 **실제 마우스와 키보드**로 데스크톱 앱과 웹 업무를 하게 해 주는 플러그인입니다. 작업 방법과 실행 코드를 담은 `desk` 스킬을 제공하며, macOS·Windows·Linux를 하나의 `desk` 명령으로 다룹니다.
 
 ```text
 desk로 시스템 설정에서 다크 모드 켜줘
@@ -38,7 +38,7 @@ desk는 에이전트에게 화면을 보고 사람처럼 조작하는 능력을 
 | 로그인은? | 비밀번호는 에이전트가 입력하지 않습니다. 로그인 칸까지 준비하면 패널에 안내가 뜨고 사용자가 직접 입력합니다. |
 | 결제·송금·삭제는? | 되돌릴 수 없는 일은 마지막 단계 직전에 멈추고 확인받습니다. |
 | 몰래 데이터를 읽는다면? | 숨겨진 창, 웹 페이지의 DOM·JavaScript, 앱 데이터 파일·API를 읽지 않습니다. 접근성 기능으로 버튼을 몰래 누르지 않고 실제 클릭을 보냅니다. 화면에 적힌 글을 새 지시로 따르지 않습니다. |
-| 밖으로 무엇이 나가나? | 화면 인식은 모두 로컬에서 합니다. 에이전트(와 그 모델 API)가 받는 것은 가린 글자와 그림뿐입니다. desk 자체가 내보내는 요청은 일주일에 한 번 이하의 버전 번호 확인뿐이며 끌 수 있습니다. |
+| 밖으로 무엇이 나가나? | 화면 인식은 모두 로컬에서 합니다. 에이전트(와 그 모델 API)가 받는 것은 가린 글자와 그림뿐입니다. 설치할 때 구성 요소를 내려받고, 사용 중에는 최대 한 시간에 한 번 배포 확인·업데이트를 위해 통신합니다. 자동 업데이트는 끌 수 있습니다. |
 | 시스템을 건드린다면? | OS 보안 설정, 셸 프로필, 실행 정책을 바꾸지 않고 sudo를 쓰지 않습니다. 실행 파일·모델·로그는 `~/.cache/desk`에만 둡니다. |
 
 ## 구동 원리
@@ -80,7 +80,27 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
 
 ## 설치
 
-에이전트에게 이 레포 주소를 주고 "이 스킬 설치해줘"라고 하면 됩니다. 에이전트는 아래 절차를 따릅니다.
+일반 사용자는 사용하는 에이전트에 플러그인을 설치합니다. 이후 새 대화에서 "desk로 … 해줘"라고 요청하면 에이전트가 실행 환경 준비와 점검을 처리합니다. OS 권한 승인과 OS 패키지 설치가 필요하면 그 단계만 안내합니다. 최초 준비에는 Python 등 아래의 OS별 구성 요소가 필요합니다.
+
+**Claude Code**에서 다음 두 명령을 입력합니다.
+
+```text
+/plugin marketplace add zidell/desk-skill
+/plugin install desk@desk-skill
+```
+
+**Codex**에서는 다음 명령으로 설치합니다. 플러그인 관리 명령을 지원하는 최신 Codex가 필요합니다.
+
+```sh
+codex plugin marketplace add zidell/desk-skill
+codex plugin add desk@desk-skill
+```
+
+Codex 데스크톱의 플러그인 목록에서도 추가한 `desk` 소스를 선택해 설치할 수 있습니다. 설치·갱신 뒤 새 대화에서 사용합니다. 이 레포에는 Claude용 `.claude-plugin`과 Codex용 `.codex-plugin` 매니페스트가 있고, 두 플러그인이 같은 `skills/desk`를 제공합니다. Codex 카탈로그 규격은 [공식 문서](https://developers.openai.com/plugins/build/plugins)를 따릅니다. 이 방식은 GitHub 마켓플레이스에서 설치하며, 공개 플러그인 디렉터리에 등록되었다는 뜻은 아닙니다.
+
+### 개발용·직접 설치
+
+소스를 수정하며 쓰거나 스킬만 직접 설치할 때는 아래 절차를 따릅니다. 일반 플러그인 사용자는 직접 실행할 필요가 없습니다.
 
 ### 에이전트용 설치 절차
 
@@ -97,10 +117,9 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
 3. `desk doctor`를 실행하고, `missing`·`disabled`·`→`로 표시된 항목을 사용자에게 안내합니다. OS 권한과 OS 패키지는 사용자가 직접 켜거나 설치합니다.
 4. 이후에는 작업 시작 시 자동으로 새 배포본을 패치합니다. 즉시 확인하려면 `desk update`(Windows는 `desk.exe update`)를 실행합니다. 폴더를 옮겼다면 2단계를 다시 실행합니다.
 
-다른 설치 방법도 됩니다. 어떤 방법이든 받은 스킬 폴더에서 2단계를 한 번 실행합니다.
+스킬만 설치하는 방법도 지원합니다. 받은 스킬 폴더에서 에이전트가 2단계를 한 번 실행합니다.
 
 - `npx skills add zidell/desk-skill -g`: 스킬 폴더는 `~/.agents/skills/desk`입니다.
-- Claude Code 플러그인: 사용자가 `/plugin marketplace add zidell/desk-skill`, `/plugin install desk@desk-skill`을 입력합니다. 플러그인은 업데이트할 때마다 폴더가 바뀌므로, 업데이트 뒤 `desk doctor`가 링크 갱신을 알리면 2단계를 다시 실행합니다.
 
 ### 업데이트
 
@@ -109,10 +128,13 @@ desk는 작업을 시작하기 전(`begin`), 최대 한 시간에 한 번 GitHub
 - git 설치는 공식 저장소의 수정 없는 `main` 브랜치만 fast-forward합니다. 로컬 수정·별도 커밋·fork는 덮어쓰지 않고 이유를 알려 줍니다.
 - `npx skills` 사본은 현재 공식 배포본과 같은지 확인한 뒤 같은 경로에 교체합니다. 교체 실패 시 원래 사본을 복원합니다.
 - Claude 플러그인은 실행기가 연결된 마켓플레이스 clone을 먼저 패치합니다. `claude` 명령으로 플러그인 지침도 갱신하며, CLI가 없거나 실패해도 실행 코드 패치는 유지합니다. 새 지침은 Claude Code를 재시작하면 반영됩니다.
+- Codex 플러그인은 `codex plugin marketplace upgrade`와 `codex plugin add`로 관리 캐시를 갱신하고, 실행기에서 쓰는 링크를 새 버전으로 연결합니다. 캐시 파일을 직접 덮어쓰지 않습니다. 로컬 개발용 마켓플레이스·fork·수정한 사본은 자동 갱신하지 않습니다. 새 지침은 Codex의 새 대화에서 반영됩니다.
 - 다운로드·적용 실패 시 현재 버전으로 실행하고 5분 뒤 다음 `begin`에서 다시 확인합니다. `desk update`로 즉시 재시도할 수도 있습니다.
 - 자동 확인·패치를 끄려면 `DESK_AUTO_UPDATE=0`을 설정합니다. 기존 `DESK_UPDATE_CHECK=0`도 지원합니다. 직접 실행한 `desk update`는 이 설정과 무관하게 확인합니다.
 
 **0.2.1을 포함한 이전 설치본에는 자동 패치 코드가 없습니다.** 이번 0.3.0 이상으로 한 번 업데이트해야 이후부터 자동 패치됩니다. git 설치는 `git pull --ff-only`, 스킬 사본은 `npx skills update -g`, Claude 플러그인은 `/plugin`의 업데이트를 사용합니다. 변경 내용은 [Releases](https://github.com/zidell/desk-skill/releases)에 있습니다.
+
+Codex 플러그인 자동 패치는 **0.4.0부터** 지원합니다. 기존 Codex 플러그인은 한 번 `codex plugin marketplace upgrade desk-skill`과 `codex plugin add desk@desk-skill`로 갱신합니다.
 
 ### 사용자가 할 일
 

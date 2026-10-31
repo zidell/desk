@@ -240,6 +240,70 @@ class UpdateTests(unittest.TestCase):
         self.assertNotIn("-y", args)
         self.assertNotIn("install", args)
 
+    def codex_fixture(self):
+        home = self.base / ".codex"
+        previous = home / "plugins/cache/desk-skill/desk/1.0.0/skills/desk"
+        current = home / "plugins/cache/desk-skill/desk/1.0.1/skills/desk"
+        put(previous, tree("1.0.0"))
+        put(current, tree("1.0.1"))
+        put(current.parent.parent, {Path(".codex-plugin/plugin.json"): b'{"version":"1.0.1"}'})
+        listing = json.dumps({"installed": [{"pluginId": "desk@desk-skill", "marketplaceSource": {
+            "sourceType": "git", "source": update.REPO}}]})
+        installed = json.dumps({"pluginId": "desk@desk-skill", "version": "1.0.1",
+                                "installedPath": str(current.parent.parent)})
+        return previous, current, listing, installed
+
+    def test_codex_updates_through_host_and_moves_runtime_links(self):
+        previous, current, listing, installed = self.codex_fixture()
+        link = self.base / ".agents/skills/desk"
+        link.parent.mkdir(parents=True)
+        if sys.platform == "win32":
+            update.run(["cmd", "/c", "mklink", "/J", link, previous])
+        else:
+            link.symlink_to(previous, target_is_directory=True)
+        with patch.object(Path, "home", return_value=self.base), patch.object(update.shutil, "which", return_value="codex"), patch.object(update, "release_files", return_value=tree("1.0.0")), patch.object(update, "run", side_effect=[listing, "{}", installed, ""] if sys.platform == "win32" else [listing, "{}", installed]) as cli:
+            # Keep junction creation real while the Codex CLI responses are fixtures.
+            real_run = update.run.side_effect
+            def invoke(argv, **kwargs):
+                if argv[0] == "cmd":
+                    return subprocess.run([str(a) for a in argv], check=True, capture_output=True).stdout
+                return real_run.__next__()
+            cli.side_effect = invoke
+            with contextlib.redirect_stdout(self.output): result = update.plugin_update(previous, "1.0.1")
+        self.assertEqual(result, (current, False))
+        self.assertEqual(link.resolve(), current.resolve())
+        commands = [c.args[0] for c in cli.call_args_list if c.args[0][0] == "codex"]
+        self.assertEqual(commands[1][1:4], ["plugin", "marketplace", "upgrade"])
+        self.assertEqual(commands[2][1:3], ["plugin", "add"])
+
+    def test_codex_refuses_local_marketplace_and_modified_cache(self):
+        previous, _, _, _ = self.codex_fixture()
+        listing = json.dumps({"installed": [{"pluginId": "desk@desk-skill", "marketplaceSource": {
+            "sourceType": "local", "source": str(self.base)}}]})
+        with patch.object(update.shutil, "which", return_value="codex"), patch.object(update, "release_files", return_value=tree("1.0.0")), patch.object(update, "run", return_value=listing) as cli:
+            with self.assertRaises(update.Deferred): update.codex_update(previous, "1.0.1")
+            self.assertEqual(cli.call_count, 1)
+            (previous / "SKILL.md").write_text("local change")
+            cli.reset_mock()
+            with self.assertRaises(update.Deferred): update.codex_update(previous, "1.0.1")
+            cli.assert_not_called()
+
+    def test_codex_rejects_stale_or_mismatched_cache(self):
+        previous, current, listing, installed = self.codex_fixture()
+        for response in (installed.replace('"1.0.1"', '"1.0.0"'), installed):
+            (current / "VERSION").write_text("1.0.0")
+            with patch.object(update.shutil, "which", return_value="codex"), patch.object(update, "release_files", return_value=tree("1.0.0")), patch.object(update, "run", side_effect=[listing, "{}", response]), patch.object(update, "refresh_plugin_links") as links:
+                with self.assertRaises(update.Deferred): update.codex_update(previous, "1.0.1")
+                links.assert_not_called()
+
+    def test_custom_codex_home_is_distinguished_from_claude(self):
+        home = self.base / "custom"
+        root = home / "plugins/cache/desk-skill/desk/1.0.0/skills/desk"
+        with patch.dict(os.environ, {"CODEX_HOME": str(home)}):
+            self.assertEqual(update.plugin_host(root), "codex")
+            self.assertEqual(update.plugin(root), ("desk-skill", root))
+        self.assertEqual(update.plugin_host(self.base / ".claude/plugins/cache/desk-skill/desk/1.0.0/skills/desk"), "claude")
+
     def test_real_live_panel_pid_defers_without_reading_screen(self):
         self.state.mkdir()
         (self.state / "overlay.pid").write_text(str(os.getpid()))

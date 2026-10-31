@@ -17,6 +17,7 @@ py -3 -X utf8 .\desk.py install                     # 런타임은 있고 명령
 - 모델은 설치할 때만 내려받는다. 실행 중에는 로컬 파일만 쓰고 화면을 외부 추론 API로 보내지 않는다.
 - 설치는 `~/.local/bin`에 `desk.exe`, `desk.cmd`, `desk.ps1`을 만들고 사용자 PATH에 추가한다. 셸 프로필과 실행 정책은 바꾸지 않는다.
 - `~/.codex/skills/desk`, `~/.agents/skills/desk`, `~/.claude/skills/desk`는 이 폴더로 가는 junction이다. `desk.cmd`·`desk.exe`는 `~/.codex/skills/desk`를 거쳐 들어온다. 다른 곳을 가리키던 junction은 교체하고, 링크가 아닌 폴더는 건드리지 않는다. 상태는 `doctor`의 `skill_links`.
+- 플러그인 첫 사용 때 에이전트가 현재 스킬 폴더에서 기본 준비와 `doctor`를 처리한다. Codex 플러그인 자동 갱신은 Codex CLI가 새 캐시를 설치한 뒤 junction만 연결한다. 실행 중인 `desk.exe`를 재빌드하지 않는다.
 
 ## 권한과 첫 실행 점검
 
