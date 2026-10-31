@@ -16,6 +16,25 @@ def call(*argv):
     subprocess.run([str(a) for a in argv],check=True)
 
 
+def is_link(path):
+    """A symlink or an NTFS junction (os.readlink reads both)."""
+    try:return path.is_symlink() or bool(os.readlink(path))
+    except (OSError,ValueError):return False
+
+
+def skill_links():
+    # ~/.codex/skills/desk comes first: desk.cmd and desk.exe enter through it.
+    plugin=Path.home()/".claude"/"plugins" in ROOT.parents
+    dirs=[(".codex","skills"),(".agents","skills")]+([] if plugin else [(".claude","skills")])
+    return [Path.home().joinpath(*d)/"desk" for d in dirs]
+
+
+def install_status():
+    """doctor fields: does every skill link point at this folder?"""
+    return {str(link):("ok" if link.exists() and link.resolve()==ROOT.resolve() else "missing or another folder → desk.py install")
+            for link in skill_links()}
+
+
 def install_commands(py):
     bin_dir=Path.home()/".local"/"bin"
     bin_dir.mkdir(parents=True,exist_ok=True)
@@ -53,13 +72,17 @@ def install_commands(py):
             if clean!=prior:
                 if clean.strip():profile.write_text(clean,encoding="utf-8-sig")
                 else:profile.unlink()
-    for base in (Path.home()/".codex"/"skills",Path.home()/".agents"/"skills"):
-        base.mkdir(parents=True,exist_ok=True)
-        link=base/"desk"
-        if not link.exists():
-            call("cmd","/c","mklink","/J",str(link),str(ROOT))
-        elif link.resolve()!=ROOT.resolve():
-            raise RuntimeError("기존 desk 스킬 경로를 보존했습니다. 연결 대상이 다릅니다: "+str(link))
+    for link in skill_links():
+        link.parent.mkdir(parents=True,exist_ok=True)
+        # Already this folder: a junction to it, or the folder itself (npx skills installs a real copy there).
+        if link.exists() and link.resolve()==ROOT.resolve():continue
+        if is_link(link):
+            # A junction or symlink to an older clone or synced folder; removing it leaves the target intact.
+            print("교체: "+str(link)+" → "+str(ROOT)+" (이전: "+str(link.resolve())+")")
+            os.rmdir(link)
+        elif link.exists():
+            raise RuntimeError("링크가 아닌 기존 경로라 덮어쓰지 않습니다: "+str(link))
+        call("cmd","/c","mklink","/J",str(link),str(ROOT))
     result=ctypes.c_size_t()
     ctypes.windll.user32.SendMessageTimeoutW(0xFFFF,0x1A,0,"Environment",2,3000,ctypes.byref(result))
     print("설치: "+str(bin_dir/"desk.cmd"))

@@ -739,6 +739,8 @@ def doctor():
         info["elevated"]=None
     if info["elevated"] is False:
         info["elevated_hint"]="관리자 권한 앱은 일반 권한 desk의 입력을 막습니다(UIPI). 그런 앱을 다룰 때는 에이전트 터미널을 관리자 권한으로 실행하세요"
+    from setup_windows import install_status
+    info["skill_links"]=install_status()
     info["detector_weights"]=(STATE/"omni"/"weights"/"icon_detect_v3"/"model.pt").exists()
     info["local_vision"]=load("vision.json",{})
     info["desktop"]=native("window",structured=True,stopped=False)["desktop"]

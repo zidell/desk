@@ -53,6 +53,13 @@ skills/desk/
 - **공통 정책은 공통 코드에.** 커서 속도·패널 모양·인식 색은 `widget.json`, 인식 결합·가리기는 `desk-see.py`, 클릭 근거는 `desk-click.py`에 둔다. 한 OS만 다르게 고치지 않는다. 한 OS에서 고치면 나머지 OS도 같이 고치거나 validation.md에 남은 일로 적는다.
 - **안전한 거부.** 안전 어댑터가 없는 환경(GNOME 등 Wayland)에서는 입력을 거부한다. Wayland에서 XWayland로 자동 우회하지 않는다.
 
+## 설치
+
+- 세 OS 모두 `desk.py install`(Windows는 `setup`/`install`)이 실행기와 `~/.claude/skills`·`~/.codex/skills`·`~/.agents/skills`의 `desk` 링크를 이 폴더로 맞춘다. 다시 실행해도 같은 결과여야 한다.
+- 다른 곳을 가리키는 링크·junction과 이전 desk 실행기는 교체하고, 그 밖의 파일·폴더는 덮어쓰지 않고 실패한다. 링크 대상이 이 폴더 자체(`npx skills`가 만든 실제 사본)면 그대로 둔다.
+- 스킬 폴더가 `~/.claude/plugins/` 아래(Claude Code 플러그인)면 `~/.claude/skills` 링크는 만들지 않는다. 플러그인이 이미 스킬을 제공한다.
+- 설치 경로는 README "에이전트용 설치 절차"와 함께 고친다. 처음 받는 사용자가 에이전트에게 레포 주소만 주고 끝까지 설치할 수 있어야 한다.
+
 ## 첫 실행 점검
 
 - 각 OS의 `desk doctor`는 빠진 권한·구성 요소마다 `missing`·`disabled`·`hint`·`→`로 고치는 방법을 함께 출력한다. 에이전트는 이를 사용자에게 그대로 전한다(SKILL.md "처음 쓸 때와 권한").

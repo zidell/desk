@@ -16,6 +16,7 @@ py -3 -X utf8 .\desk.py install                     # 런타임은 있고 명령
 - `--detector`는 OmniParser icon_detect_v3 가중치와 PyTorch를, `--vision`은 SmolVLM2-500M과 Transformers를 설치한다. NVIDIA GPU면 CUDA 12.8 wheel, 아니면 CPU wheel을 쓴다.
 - 모델은 설치할 때만 내려받는다. 실행 중에는 로컬 파일만 쓰고 화면을 외부 추론 API로 보내지 않는다.
 - 설치는 `~/.local/bin`에 `desk.exe`, `desk.cmd`, `desk.ps1`을 만들고 사용자 PATH에 추가한다. 셸 프로필과 실행 정책은 바꾸지 않는다.
+- `~/.codex/skills/desk`, `~/.agents/skills/desk`, `~/.claude/skills/desk`는 이 폴더로 가는 junction이다. `desk.cmd`·`desk.exe`는 `~/.codex/skills/desk`를 거쳐 들어온다. 다른 곳을 가리키던 junction은 교체하고, 링크가 아닌 폴더는 건드리지 않는다. 상태는 `doctor`의 `skill_links`.
 
 ## 권한과 첫 실행 점검
 

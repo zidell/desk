@@ -127,6 +127,61 @@ act() {
 
 helper() { "$BIN" "$@"; }
 
+# Per-user commands and skill links, owned by this folder. Links that point elsewhere (an older clone, a synced
+# folder) are replaced; real files and directories are never touched. Launchers call bash explicitly, so a copy
+# that lost its executable bit still runs.
+same_dir() { [ -d "$1" ] && [ "$(cd "$1" && pwd -P)" = "$(cd "$2" && pwd -P)" ]; }
+link_skill() {
+    mkdir -p "$(dirname "$2")"
+    same_dir "$2" "$1" && return 0  # a link to this folder, or the folder itself (npx skills copy)
+    if [ -L "$2" ]; then
+        echo "교체: $2 → $1 (이전: $(readlink "$2"))"
+        rm "$2"
+    elif [ -e "$2" ]; then
+        die "링크가 아닌 기존 경로라 덮어쓰지 않습니다: $2"
+    fi
+    ln -s "$1" "$2"
+}
+launcher_text() { printf '#!/bin/sh\nexec /bin/bash %q "$@"' "$1"; }
+write_launcher() {  # NAME SCRIPT
+    local path="$HOME/.local/bin/$1" text
+    text=$(launcher_text "$2")
+    if [ -L "$path" ] || [ -e "$path" ]; then
+        if [ -f "$path" ] && [ "$(cat "$path")" = "$text" ]; then return 0; fi
+        # Only an earlier desk launcher: a symlink, or a wrapper that runs a desk script.
+        if [ -L "$path" ] || grep -q "^exec .*/$1" "$path" 2>/dev/null; then
+            echo "교체: $path"; rm "$path"
+        else
+            die "desk 실행기가 아닌 기존 파일이라 덮어쓰지 않습니다: $path"
+        fi
+    fi
+    printf '%s\n' "$text" >"$path"; chmod 755 "$path"
+}
+skill_targets() {
+    local d
+    for d in .claude/skills .codex/skills .agents/skills; do
+        # A Claude Code plugin install already gives Claude the skill.
+        case "$DIR" in "$HOME/.claude/plugins/"*) [ "$d" = .claude/skills ] && continue ;; esac
+        echo "$HOME/$d/desk"
+    done
+}
+install_desk() {
+    mkdir -p "$HOME/.local/bin"
+    write_launcher desk "$DIR/desk"
+    write_launcher desk-ssh "$DIR/desk-ssh"
+    local t; while read -r t; do link_skill "$DIR" "$t"; done < <(skill_targets)
+    echo "launcher: $HOME/.local/bin/desk"
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "PATH에 $HOME/.local/bin이 없습니다. 셸 설정에 추가하거나 $HOME/.local/bin/desk로 실행하세요" ;; esac
+}
+install_status() {
+    local t
+    [ -f "$HOME/.local/bin/desk" ] && [ "$(cat "$HOME/.local/bin/desk")" = "$(launcher_text "$DIR/desk")" ] \
+        && echo "launcher: $HOME/.local/bin/desk" || echo "launcher: missing or another folder → desk install"
+    while read -r t; do
+        same_dir "$t" "$DIR" && echo "skill link $t: ok" || echo "skill link $t: missing or another folder → desk install"
+    done < <(skill_targets)
+}
+
 # Terminal-app grants (TCC). Reported, never changed: the user grants them in System Settings.
 PERM_HELP_AX='시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 이 터미널 앱을 켜고 터미널을 다시 실행하세요'
 PERM_HELP_SCREEN='시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음(화면 기록)에서 이 터미널 앱을 켜고 터미널을 다시 실행하세요'
@@ -937,6 +992,9 @@ QUIET=0
 [ "${1:-}" = "-q" ] && { QUIET=1; shift; }
 cmd="${1:-help}"; shift || true
 case "$cmd" in
+    install)
+        install_desk
+        ;;
     permissions)
         build
         permission_report "$@"
@@ -948,6 +1006,7 @@ case "$cmd" in
         echo "state: $STATE"
         echo "front: $(helper front)"
         permission_report
+        install_status
         [ -f "$STATE/omni/weights/icon_detect_v3/model.pt" ] && echo 'detector weights: installed' || echo 'detector weights: missing (SKILL.md)'
         [ -x "$LLM/bin/python" ] && echo 'local vision: MLX runtime installed' || echo 'local vision: not installed'
         overlay_running && echo 'panel: on' || echo 'panel: off'
@@ -1057,6 +1116,7 @@ case "$cmd" in
 desk begin ['요청 요약']         제어 세션 시작 (하단 패널 표시, 이전 중지 해제) — 요청마다 한 번
 desk end                        제어 세션 끝 (패널 닫기)
 desk status | stop | log [N]    상태 / 사용자 대신 중지 / 지금까지 한 동작 기록
+desk install                    ~/.local/bin/desk·desk-ssh와 Claude Code·Codex·Agents 스킬 링크를 이 폴더로 연결
 desk permissions [--request]    이 터미널 앱의 손쉬운 사용·화면 기록 권한 확인 (--request: 시스템 승인 창 띄우기)
 desk say '지금 하는 일'          동작 기록에 지금 하는 일을 한 줄 남김 ("메일에서 금액 찾는 중", "제출 버튼 누를 차례").
                                 패널은 기록의 최근 두 줄을 보인다(새 줄이 아래)

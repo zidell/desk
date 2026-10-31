@@ -28,7 +28,8 @@ KDE 기본 캡처는 OpenGL compositor가 필요하며 QPainter 모드는 지원
 OS 패키지 설치에 임의로 sudo를 실행하지 않는다.
 
 ```bash
-python3 '<skill>/linux/setup_linux.py' --runtime --ocr --headers
+python3 '<skill>/desk.py' install            # 실행기와 스킬 링크만
+python3 '<skill>/desk.py' setup [--headers]  # 로컬 런타임·OCR 모델까지 (= setup_linux.py --runtime --ocr)
 desk doctor
 ```
 
@@ -39,6 +40,7 @@ desk doctor
 다른 배포판은 해당 배포판의 LayerShellQt 개발 패키지를 설치한다.
 
 실행기는 `~/.local/bin/desk`이며 스킬 폴더 파일이 실행 권한을 잃어도 Python으로 직접 호출한다.
+`install`은 Claude Code·Codex·Agents 스킬 폴더의 `desk` 링크를 이 폴더로 맞추고, 다른 곳을 가리키던 링크는 교체한다. 링크가 아닌 파일·폴더는 건드리지 않는다.
 스킬 폴더에는 실행 파일·venv·모델·스크린샷·로그를 만들지 않는다.
 `DESK_STATE`는 세션 상태와 테스트 결과의 별도 로컬 경로다.
 컴파일한 KWin·LayerShellQt 바인딩은 로컬 캐시에 둔다.

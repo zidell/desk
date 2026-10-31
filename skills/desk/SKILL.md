@@ -29,6 +29,10 @@ OS를 자동 선택하는 하나의 스킬이다. 에이전트가 판단하고, 
 
 ## 처음 쓸 때와 권한
 
+- `desk`를 찾지 못하거나 `doctor`의 `launcher`·`skill link`가 이 폴더가 아니면 이 스킬 폴더에서 설치 명령을 실행한다.
+  macOS·Linux는 `python3 <스킬 폴더>/desk.py install`, Windows는 `py -3 -X utf8 <스킬 폴더>\desk.py setup`.
+  `~/.local/bin/desk`와 Claude Code·Codex·Agents 스킬 폴더 링크를 이 폴더로 맞춘다. 다른 곳을 가리키던 링크는 교체하고, 링크가 아닌 파일·폴더는 건드리지 않는다.
+  설치 전이라도 `python3 <스킬 폴더>/desk.py 명령`(Windows는 `py -3 -X utf8 <스킬 폴더>\desk.py 명령`)으로 같은 명령을 실행할 수 있다.
 - 이 기기에서 처음 쓰거나 `begin`·`see`가 권한·설치 오류로 실패하면 `desk doctor`를 실행하고, 결과의 `missing`·`disabled`·`hint`·`→` 항목을 사용자에게 그대로 안내한다.
 - OS 권한은 사용자가 직접 켠다. 에이전트가 보안 설정·셸 프로필·실행 정책을 바꾸거나 sudo로 설치하지 않는다.
   - macOS: 에이전트를 실행한 터미널 앱에 손쉬운 사용·화면 기록이 필요하다. `desk permissions --request`로 시스템 승인 창을 띄울 수 있고, 켠 뒤에는 터미널 앱을 다시 실행해야 한다.

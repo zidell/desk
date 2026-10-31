@@ -113,6 +113,9 @@ def doctor():
         cached=Path.home()/".cache/desk/headers/usr/include/LayerShellQt/window.h"
         lines.append("LayerShellQt headers: "+("installed" if include.exists() or cached.exists() else "missing"))
         lines.append("capture: KDE Spectacle" if os.environ.get("DESK_CAPTURE","native")=="native" else "capture: portal (approval required)")
+    sys.path.insert(0,str(Path(__file__).resolve().parent))
+    from setup_linux import install_status
+    lines.extend(install_status())
     try:lines.append("session status: "+send(["status"],2)["output"])
     except (OSError,RuntimeError):lines.append("panel: off")
     print("\n".join(lines))
@@ -787,6 +790,10 @@ def main(argv):
         finally:session.close()
     if not argv or argv[0] in ("help","--help","-h"):print(HELP);return 0
     if argv[0]=="doctor":return doctor()
+    if argv[0] in ("install","setup"):
+        # install: launcher and skill links only. setup: also the local runtime and OCR models.
+        flags=["--install-only"] if argv[0]=="install" else ["--runtime","--ocr",*argv[1:]]
+        return subprocess.call([sys.executable,str(Path(__file__).resolve().parent/"setup_linux.py"),*flags])
     if argv[0]=="log":
         path=STATE/"actions.log";print("\n".join(path.read_text().splitlines()[-int(argv[1] if len(argv)>1 else 30):]) if path.exists() else "");return 0
     if argv[0]=="stop":

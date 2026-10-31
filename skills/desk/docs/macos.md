@@ -4,7 +4,7 @@
 
 ## 준비
 
-- `~/.local/bin/desk`를 이 스킬의 `desk` 파일에 링크하고 PATH에 넣는다.
+- `python3 <스킬 폴더>/desk.py install`(또는 `desk install`)이 `~/.local/bin/desk`·`desk-ssh` 실행기와 Claude Code·Codex·Agents 스킬 링크를 만든다. `~/.local/bin`이 PATH에 없으면 알려 준다. 셸 프로필은 바꾸지 않는다.
 - Swift helper는 처음 실행할 때와 소스가 바뀌었을 때 `~/.cache/desk/desk-helper`로 빌드된다. Xcode Command Line Tools(`swiftc`)가 필요하다.
 - `begin`은 클릭 근거를 비교할 Pillow를 준비한다. `~/.cache/desk/omni` 환경이 있으면 쓰고, 없으면 `~/.cache/desk/evidence` venv를 만든다. 준비에 실패하면 클릭을 허용하지 않는다.
 
@@ -56,7 +56,7 @@ SSH 셸은 콘솔 GUI 세션 밖이라 화면 권한을 받을 수 없다(`화�
   ```bash
   desk-ssh run "desk begin '요청 요약' && desk say '하는 일' && desk open 'Google Chrome'" 120
   ```
-- `~/.local/bin/desk-ssh`를 이 파일에 링크한다. 실행 권한이 빠져 있으면 `bash <스킬 폴더>/desk-ssh`로 부른다.
+- `desk install`이 `~/.local/bin/desk-ssh`를 만든다. 없으면 `bash <스킬 폴더>/desk-ssh`로 부른다.
 - 워커는 첫 `run`에서 자동으로 뜬다. 작업이 끝나면(중지·실패로 끝나도) `desk end` 뒤 `desk-ssh stop`까지 한다. `stop`은 워커가 띄운 Terminal 창만 닫는다. 상태는 `desk-ssh status`, 파일은 `~/.cache/desk/ssh/`.
 - 조건: 그 Mac 콘솔에 사용자가 로그인해 있고, Terminal.app에 화면 기록·손쉬운 사용이 켜져 있어야 한다.
 - 조작은 그 Mac의 모니터에서 일어난다. 사용자가 그 화면을 보고 있는지(유니버설 컨트롤, 화면 공유, 옆 모니터) 확인하고 진행한다. 유니버설 컨트롤로 커서가 넘어와 있으면 사용자 개입으로 감지돼 종료 코드 6이 날 수 있다.

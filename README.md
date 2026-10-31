@@ -73,28 +73,35 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
 
 ## 설치
 
-Claude Code 플러그인으로:
+에이전트에게 이 레포 주소를 주고 "이 스킬 설치해줘"라고 하면 됩니다. 에이전트는 아래 절차를 따릅니다.
 
-```text
-/plugin marketplace add zidell/desk-skill
-/plugin install desk@desk-skill
-```
+### 에이전트용 설치 절차
 
-또는 레포를 받아 스킬 폴더에 연결합니다.
+1. 레포를 받습니다. 위치는 바꿔도 되며, 이후 명령의 경로만 맞추면 됩니다.
+   ```sh
+   git clone https://github.com/zidell/desk-skill.git ~/.local/share/desk-skill                         # macOS·Linux
+   git clone https://github.com/zidell/desk-skill.git "$env:USERPROFILE\.local\share\desk-skill"     # Windows PowerShell
+   ```
+2. 실행 명령과 스킬 링크를 설치합니다. `~/.local/bin/desk`(Windows는 `desk.exe`)를 만들고, `~/.claude/skills/desk`·`~/.codex/skills/desk`·`~/.agents/skills/desk`가 이 폴더를 가리키게 합니다. 다른 곳을 가리키던 링크는 교체하고, 링크가 아닌 파일·폴더는 건드리지 않습니다.
+   ```sh
+   python3 ~/.local/share/desk-skill/skills/desk/desk.py install                       # macOS·Linux
+   py -3 -X utf8 "$env:USERPROFILE\.local\share\desk-skill\skills\desk\desk.py" setup   # Windows (pip 패키지 설치 포함)
+   ```
+3. `desk doctor`를 실행하고, `missing`·`disabled`·`→`로 표시된 항목을 사용자에게 안내합니다. OS 권한과 OS 패키지는 사용자가 직접 켜거나 설치합니다.
+4. 업데이트는 `git -C ~/.local/share/desk-skill pull`로 합니다. 폴더를 옮겼다면 2단계를 다시 실행합니다.
 
-```sh
-git clone https://github.com/zidell/desk-skill.git ~/Sites/desk-skill
-ln -s ~/Sites/desk-skill/skills/desk ~/.claude/skills/desk   # Claude Code
-ln -s ~/Sites/desk-skill/skills/desk ~/.codex/skills/desk    # Codex
-```
+다른 설치 방법도 됩니다. 어떤 방법이든 받은 스킬 폴더에서 2단계를 한 번 실행합니다.
 
-그다음 에이전트에게 "desk 준비해줘"라고 하면 됩니다. 에이전트가 `desk doctor`로 이 컴퓨터를 점검하고, 빠진 권한이나 구성 요소를 무엇을 어디서 켜야 하는지와 함께 알려 줍니다. OS 권한은 사용자가 직접 켭니다.
+- `npx skills add zidell/desk-skill -g`: 스킬 폴더는 `~/.agents/skills/desk`입니다.
+- Claude Code 플러그인: 사용자가 `/plugin marketplace add zidell/desk-skill`, `/plugin install desk@desk-skill`을 입력합니다. 플러그인은 업데이트할 때마다 폴더가 바뀌므로, 업데이트 뒤 `desk doctor`가 링크 갱신을 알리면 2단계를 다시 실행합니다.
 
-| OS | 사용자가 할 일 |
+### 사용자가 할 일
+
+| OS | 할 일 |
 |---|---|
-| macOS | 에이전트를 실행하는 터미널 앱에 **손쉬운 사용**과 **화면 기록** 권한을 켜고 터미널을 다시 실행합니다. Xcode Command Line Tools가 필요합니다. |
-| Windows | Python 3.10 이상을 설치합니다. 에이전트가 `setup`을 실행해 `~/.local/bin/desk.exe`를 설치합니다. OCR 언어가 없으면 설정에서 추가합니다. |
-| Linux | 에이전트가 알려 주는 OS 패키지(PyQt6, Tesseract, AT-SPI 등)를 설치합니다. |
+| macOS | 에이전트를 실행하는 터미널 앱에 **손쉬운 사용**과 **화면 기록** 권한을 켜고 터미널을 다시 실행합니다(`desk permissions --request`로 승인 창을 띄울 수 있습니다). Xcode Command Line Tools가 필요합니다. |
+| Windows | Python 3.10 이상을 설치합니다. OCR 언어가 없으면 `doctor` 안내대로 설정에서 추가합니다. |
+| Linux | `doctor`가 알려 주는 OS 패키지(PyQt6, Tesseract, AT-SPI 등)를 설치합니다. |
 
 자세한 내용은 [macOS](skills/desk/docs/macos.md) · [Windows](skills/desk/docs/windows.md) · [Linux](skills/desk/docs/linux.md) 문서에 있습니다.
 
