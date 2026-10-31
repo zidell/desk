@@ -29,13 +29,28 @@ def link(source,target):
     target.symlink_to(source,target_is_directory=source.is_dir())
 
 
+def stable_root():
+    """Claude Code installs a plugin in plugins/cache/<marketplace>/<plugin>/<version>/, a new folder on every update.
+    Its marketplace clone in plugins/marketplaces/<marketplace>/ keeps one path and is updated with it."""
+    parts=ROOT.parts
+    for i in range(len(parts)-4):
+        if parts[i]=="plugins" and parts[i+1]=="cache":
+            stable=Path(*parts[:i+1])/"marketplaces"/parts[i+2]/Path(*parts[i+5:])
+            if (stable/"SKILL.md").exists():return stable
+    return ROOT
+
+
+def is_plugin():
+    parts=ROOT.parts
+    return any(parts[i]=="plugins" and parts[i+1] in ("cache","marketplaces") for i in range(len(parts)-1))
+
+
 SKILL_DIRS=(".claude/skills",".codex/skills",".agents/skills")
 
 
 def skill_links():
     """Skill folders this install should own; a Claude Code plugin install already provides the skill to Claude."""
-    plugin=Path.home()/".claude"/"plugins" in ROOT.parents
-    return [Path.home()/d/"desk" for d in SKILL_DIRS if not (plugin and d==".claude/skills")]
+    return [Path.home()/d/"desk" for d in SKILL_DIRS if not (is_plugin() and d==".claude/skills")]
 
 
 def install():
@@ -43,7 +58,8 @@ def install():
     launcher.parent.mkdir(parents=True,exist_ok=True)
     # A copied or synced skill folder may lose executable permission. The wrapper calls Python explicitly.
     import shlex
-    text="#!/bin/sh\nexec /usr/bin/python3 "+shlex.quote(str(ROOT/"desk.py"))+ ' "$@"\n'
+    root=stable_root()
+    text="#!/bin/sh\nexec /usr/bin/python3 "+shlex.quote(str(root/"desk.py"))+ ' "$@"\n'
     if launcher.is_symlink() or launcher.exists():
         old=launcher.read_text(errors="replace") if launcher.is_file() else ""
         # Only an earlier desk launcher (another clone, a moved folder) is replaced.
@@ -53,7 +69,7 @@ def install():
         launcher.unlink()
     launcher.write_text(text);launcher.chmod(0o755)
     for target in skill_links():
-        link(ROOT,target)
+        link(root,target)
     desktop=Path.home()/".local"/"share"/"applications"/"org.desk.Tool.desktop"
     desktop.parent.mkdir(parents=True,exist_ok=True)
     desktop.write_text('[Desktop Entry]\nType=Application\nName=desk\nComment=Visible desktop control with a stop panel\nExec='+str(launcher)+' help\nIcon=input-mouse\nNoDisplay=true\nTerminal=false\n')
@@ -66,11 +82,11 @@ def install():
 def install_status():
     """doctor lines: is the launcher and every skill link pointing at this folder?"""
     launcher=Path.home()/".local"/"bin"/"desk"
-    lines=[]
-    ok=launcher.is_file() and str(ROOT/"desk.py") in launcher.read_text(errors="replace")
+    lines=[];root=stable_root()
+    ok=launcher.is_file() and str(root/"desk.py") in launcher.read_text(errors="replace")
     lines.append("launcher: "+(str(launcher) if ok else "missing or another folder → desk.py install"))
     for target in skill_links():
-        good=target.resolve()==ROOT.resolve() if target.exists() else False
+        good=target.resolve()==root.resolve() if target.exists() else False
         lines.append("skill link "+str(target)+": "+("ok" if good else "missing or another folder → desk.py install"))
     return lines
 

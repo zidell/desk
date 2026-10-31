@@ -1,6 +1,6 @@
 {
   "name": "desk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "macOS·Windows·Linux 화면을 로컬 OCR·접근성 정보·아이콘 검출로 읽고, 보이는 마우스와 키보드로 앱·웹 업무를 수행하는 스킬",
   "author": {
     "name": "zidell",

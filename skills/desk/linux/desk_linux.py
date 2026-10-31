@@ -817,6 +817,10 @@ def main(argv):
         deadline=time.monotonic()+3
         while socket_path().exists() and time.monotonic()<deadline:time.sleep(.02)
     print(result["output"],file=sys.stderr if result["code"] else sys.stdout)
+    if argv[0]=="begin" and not result["code"]:
+        sys.stdout.flush()
+        try:subprocess.run([sys.executable,str(ROOT/"desk-update.py"),"notice",str(STATE),str(ROOT)],stdin=subprocess.DEVNULL,timeout=10)
+        except (OSError,subprocess.SubprocessError):pass  # an update check never breaks begin
     return result["code"]
 
 

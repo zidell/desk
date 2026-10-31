@@ -22,16 +22,32 @@ def is_link(path):
     except (OSError,ValueError):return False
 
 
+def stable_root():
+    """Claude Code installs a plugin in plugins/cache/<marketplace>/<plugin>/<version>/, a new folder on every update.
+    Its marketplace clone in plugins/marketplaces/<marketplace>/ keeps one path and is updated with it."""
+    parts=ROOT.parts
+    for i in range(len(parts)-4):
+        if parts[i]=="plugins" and parts[i+1]=="cache":
+            stable=Path(*parts[:i+1])/"marketplaces"/parts[i+2]/Path(*parts[i+5:])
+            if (stable/"SKILL.md").exists():return stable
+    return ROOT
+
+
+def is_plugin():
+    parts=ROOT.parts
+    return any(parts[i]=="plugins" and parts[i+1] in ("cache","marketplaces") for i in range(len(parts)-1))
+
+
 def skill_links():
     # ~/.codex/skills/desk comes first: desk.cmd and desk.exe enter through it.
-    plugin=Path.home()/".claude"/"plugins" in ROOT.parents
-    dirs=[(".codex","skills"),(".agents","skills")]+([] if plugin else [(".claude","skills")])
+    dirs=[(".codex","skills"),(".agents","skills")]+([] if is_plugin() else [(".claude","skills")])
     return [Path.home().joinpath(*d)/"desk" for d in dirs]
 
 
 def install_status():
     """doctor fields: does every skill link point at this folder?"""
-    return {str(link):("ok" if link.exists() and link.resolve()==ROOT.resolve() else "missing or another folder → desk.py install")
+    root=stable_root()
+    return {str(link):("ok" if link.exists() and link.resolve()==root.resolve() else "missing or another folder → desk.py install")
             for link in skill_links()}
 
 
@@ -72,17 +88,18 @@ def install_commands(py):
             if clean!=prior:
                 if clean.strip():profile.write_text(clean,encoding="utf-8-sig")
                 else:profile.unlink()
+    root=stable_root()
     for link in skill_links():
         link.parent.mkdir(parents=True,exist_ok=True)
         # Already this folder: a junction to it, or the folder itself (npx skills installs a real copy there).
-        if link.exists() and link.resolve()==ROOT.resolve():continue
+        if link.exists() and link.resolve()==root.resolve():continue
         if is_link(link):
             # A junction or symlink to an older clone or synced folder; removing it leaves the target intact.
-            print("교체: "+str(link)+" → "+str(ROOT)+" (이전: "+str(link.resolve())+")")
+            print("교체: "+str(link)+" → "+str(root)+" (이전: "+str(link.resolve())+")")
             os.rmdir(link)
         elif link.exists():
             raise RuntimeError("링크가 아닌 기존 경로라 덮어쓰지 않습니다: "+str(link))
-        call("cmd","/c","mklink","/J",str(link),str(ROOT))
+        call("cmd","/c","mklink","/J",str(link),str(root))
     result=ctypes.c_size_t()
     ctypes.windll.user32.SendMessageTimeoutW(0xFFFF,0x1A,0,"Environment",2,3000,ctypes.byref(result))
     print("설치: "+str(bin_dir/"desk.cmd"))

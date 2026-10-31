@@ -681,6 +681,8 @@ def begin(summary):
     ready=ensure_detector()
     print("제어 시작 · 중지: ESC 한 번 또는 패널 중지 버튼")
     print("로컬: Windows OCR + UI Automation" + (" + GPU/CPU 아이콘 검출" if ready else " · 검출기 미설치/시작 실패 (desk doctor)"))
+    try:subprocess.run([sys.executable,"-X","utf8",str(ROOT/"desk-update.py"),"notice",str(STATE),str(ROOT)],stdin=subprocess.DEVNULL,timeout=10)
+    except (OSError,subprocess.SubprocessError):pass  # an update check never breaks begin
 
 
 def ask(args):

@@ -32,6 +32,8 @@ skills/desk/
   desk-see.py     세 OS 공통: 인식 결과 결합(fusion), 비밀값 가리기(redact, redact_image)
   desk-click.py   세 OS 공통: 클릭 근거 기록과 이동·누르기 직전 대상 검증
   desk-ask.py     영역 질문(ask), 로컬 모델 그림자 답
+  desk-update.py  세 OS 공통: begin 때 주 1회 이하 버전 확인과 업데이트 안내
+  VERSION         배포 버전(plugin.json과 같게)
   widget.json     세 OS 공통 패널·인식 표시·커서 속도 설정
   redact-words.txt  묶음 키 판정용 영어 단어 목록
   windows/        Python 명령부, C# native helper·launcher, 로컬 비전, setup, tests/
@@ -71,6 +73,7 @@ skills/desk/
 - 소스 폴더에 실행 파일·venv·모델·로그·스크린샷·캐시를 만들지 않는다. 모두 `~/.cache/desk`(`DESK_STATE`)에 둔다. `.gitignore`가 있다고 소스 폴더에 써도 된다는 뜻은 아니다.
 - sudo, 셸 프로필, PowerShell 실행 정책, 시스템 라이브러리·서비스, kwinrc, 시스템 플러그인 디렉터리, OS 보안 설정을 바꾸지 않는다. 필요한 OS 패키지는 안내만 한다.
 - 모델 다운로드는 설치(setup) 때만 한다. 실행 중에 화면을 외부 추론 API로 보내지 않는다.
+- 실행 중 desk가 직접 내보내는 네트워크 요청은 `desk-update.py`의 버전 확인 하나뿐이다. 주 1회 이하, 백그라운드, `VERSION` 파일만 받고, `DESK_UPDATE_CHECK=0`으로 끈다. 실패해도 `begin`을 막지 않으며 스스로 업데이트하지 않는다. 다른 요청을 추가하지 않는다.
 - `ask`의 로컬 모델 답은 그림자 모드다. 종류별 30문항 이상·정확도 95% 이상·화면에 없는 답에 90% 이상 "없음"·중앙값 5초 이하를 넘기 전에는 판단 근거로 쓰지 않는다.
 - 새 서드파티 소스·가중치를 넣거나 내려받게 하면 라이선스를 확인해 README의 라이선스 절에 적는다. 업스트림 원본을 동봉할 때는 체크섬과 출처를 함께 둔다(`linux/atspi_runtime/` 참고).
 
@@ -109,5 +112,6 @@ Python만 고쳤을 때 최소한 `python3 -m py_compile`로 문법을 확인한
 
 ## 배포
 
-- 사용자에게 보이는 변경을 내보낼 때 `.claude-plugin/plugin.json`의 `version`을 올린다(SemVer).
+- 사용자에게 보이는 변경을 내보낼 때 `skills/desk/VERSION`과 `.claude-plugin/plugin.json`의 `version`을 함께 올린다(SemVer). 업데이트 안내는 `VERSION`을, 플러그인 업데이트는 `plugin.json`을 본다.
+- main에 push한 `VERSION`이 곧 사용자에게 알려지는 버전이다. 버전을 올린 커밋에 `vX.Y.Z` 태그를 붙이고 GitHub Release에 변경 내용을 적는다.
 - 커밋·태그·푸시는 사용자가 요청할 때만 한다.
