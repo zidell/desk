@@ -110,6 +110,12 @@ desk는 `begin`할 때 일주일에 한 번 이하로, 백그라운드에서 Git
 
 자세한 내용은 [macOS](skills/desk/docs/macos.md) · [Windows](skills/desk/docs/windows.md) · [Linux](skills/desk/docs/linux.md) 문서에 있습니다.
 
+## 기여
+
+버그 제보와 제안은 [Issues](https://github.com/zidell/desk-skill/issues)에 남겨 주세요. 코드를 고쳤다면 레포를 fork해서 PR을 보내 주세요. 에이전트에게 "이 수정으로 PR 보내줘"라고 하면 fork와 PR 생성까지 해 줍니다.
+
+자기 기기에 맞게 고쳐 쓰려면 받은 clone을 직접 고치기보다 fork해서 쓰는 편이 낫습니다. clone을 고친 채로 두면 업데이트(`git pull`)가 충돌할 수 있습니다.
+
 ## 개발
 
 구조, 설계 원칙, 빌드·테스트 방법은 [AGENTS.md](AGENTS.md), OS별 검증 상태는 [validation.md](skills/desk/docs/validation.md)에 있습니다.

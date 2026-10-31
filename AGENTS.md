@@ -114,4 +114,6 @@ Python만 고쳤을 때 최소한 `python3 -m py_compile`로 문법을 확인한
 
 - 사용자에게 보이는 변경을 내보낼 때 `skills/desk/VERSION`과 `.claude-plugin/plugin.json`의 `version`을 함께 올린다(SemVer). 업데이트 안내는 `VERSION`을, 플러그인 업데이트는 `plugin.json`을 본다.
 - main에 push한 `VERSION`이 곧 사용자에게 알려지는 버전이다. 버전을 올린 커밋에 `vX.Y.Z` 태그를 붙이고 GitHub Release에 변경 내용을 적는다.
-- 커밋·태그·푸시는 사용자가 요청할 때만 한다.
+- origin에 push 권한이 있으면(레포 주인) 수정 후 바로 커밋하고 push까지 한다. 버전을 올렸으면 `vX.Y.Z` 태그도 push한다.
+- push 권한이 없으면(설치해서 쓰는 사람) 커밋까지만 하고, 기여하려면 fork 후 PR을 보내도록 안내한다. 이 레포로 push를 시도하지 않는다.
+- 커밋 메시지와 PR 본문에 AI 공동 작성자·생성 표기를 넣지 않는다.
