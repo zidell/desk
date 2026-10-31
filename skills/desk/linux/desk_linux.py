@@ -753,7 +753,7 @@ class Session:
         self.listener.close();socket_path().unlink(missing_ok=True);self.panel.hide();self.marks.hide()
 
 
-HELP="""desk begin '요청' | say '설명' | status | stop | end | doctor
+HELP="""desk begin '요청' | say '설명' | status | stop | end | doctor | update
 desk see | look | front | shot [--full|--region x,y,w,h] | read [--window]
 desk click|dclick|rclick X Y | click-el N [--force] | click-text '이름' [N] [--force]
 desk key primary+l | type '텍스트' | move X Y | drag X Y X2 Y2
@@ -817,10 +817,6 @@ def main(argv):
         deadline=time.monotonic()+3
         while socket_path().exists() and time.monotonic()<deadline:time.sleep(.02)
     print(result["output"],file=sys.stderr if result["code"] else sys.stdout)
-    if argv[0]=="begin" and not result["code"]:
-        sys.stdout.flush()
-        try:subprocess.run([sys.executable,str(ROOT/"desk-update.py"),"notice",str(STATE),str(ROOT)],stdin=subprocess.DEVNULL,timeout=10)
-        except (OSError,subprocess.SubprocessError):pass  # an update check never breaks begin
     return result["code"]
 
 

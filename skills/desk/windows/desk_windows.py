@@ -681,8 +681,6 @@ def begin(summary):
     ready=ensure_detector()
     print("제어 시작 · 중지: ESC 한 번 또는 패널 중지 버튼")
     print("로컬: Windows OCR + UI Automation" + (" + GPU/CPU 아이콘 검출" if ready else " · 검출기 미설치/시작 실패 (desk doctor)"))
-    try:subprocess.run([sys.executable,"-X","utf8",str(ROOT/"desk-update.py"),"notice",str(STATE),str(ROOT)],stdin=subprocess.DEVNULL,timeout=10)
-    except (OSError,subprocess.SubprocessError):pass  # an update check never breaks begin
 
 
 def ask(args):
@@ -761,7 +759,7 @@ desk key ctrl+c | type [--keys] '텍스트' | wait [초]
 desk open 앱.exe|URL|파일 | open --hwnd 창번호 | windows
 desk ask --region x,y,w,h --type 글자|숫자|선택|색|창|그림 '질문'
 desk ask-ref 질문ID '답' | ask-report [--list]
-desk setup [--detector] [--vision] | install
+desk setup [--detector] [--vision] | install | update
 출처: A=UI Automation, O=Windows OCR, D=로컬 검출기, C=로컬 그림 설명
 종료: 1=없음/모호함, 2=환경 오류, 3=사용자 중지, 5=화면 변화 없음, 6=화면·포커스 변경
 primary/cmd는 Windows에서 ctrl. Windows 키는 win. -q는 조작 뒤 전체 목록 생략.

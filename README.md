@@ -95,7 +95,7 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
    py -3 -X utf8 "$env:USERPROFILE\.local\share\desk-skill\skills\desk\desk.py" setup   # Windows (pip 패키지 설치 포함)
    ```
 3. `desk doctor`를 실행하고, `missing`·`disabled`·`→`로 표시된 항목을 사용자에게 안내합니다. OS 권한과 OS 패키지는 사용자가 직접 켜거나 설치합니다.
-4. 업데이트는 `git -C ~/.local/share/desk-skill pull`로 합니다. 폴더를 옮겼다면 2단계를 다시 실행합니다.
+4. 이후에는 작업 시작 시 자동으로 새 배포본을 패치합니다. 즉시 확인하려면 `desk update`(Windows는 `desk.exe update`)를 실행합니다. 폴더를 옮겼다면 2단계를 다시 실행합니다.
 
 다른 설치 방법도 됩니다. 어떤 방법이든 받은 스킬 폴더에서 2단계를 한 번 실행합니다.
 
@@ -104,7 +104,15 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
 
 ### 업데이트
 
-desk는 `begin`할 때 일주일에 한 번 이하로, 백그라운드에서 GitHub의 버전 번호 파일(`skills/desk/VERSION`) 하나만 확인합니다. 새 버전이 있으면 에이전트가 작업을 마친 뒤 설치 방식에 맞는 업데이트 명령을 알려 줍니다. 스스로 업데이트하지는 않습니다. 끄려면 `DESK_UPDATE_CHECK=0`을 설정하세요. 변경 내용은 [Releases](https://github.com/zidell/desk-skill/releases)에 있습니다.
+desk는 작업을 시작하기 전(`begin`), 최대 한 시간에 한 번 GitHub의 버전을 확인하고 새 배포 태그의 코드를 자동으로 패치합니다. 패치 뒤 새 코드로 작업을 시작하며, 제어 세션이 실행 중이면 갱신을 미룹니다. 사용하지 않는 동안 별도 상주 프로그램을 실행하지는 않습니다.
+
+- git 설치는 공식 저장소의 수정 없는 `main` 브랜치만 fast-forward합니다. 로컬 수정·별도 커밋·fork는 덮어쓰지 않고 이유를 알려 줍니다.
+- `npx skills` 사본은 현재 공식 배포본과 같은지 확인한 뒤 같은 경로에 교체합니다. 교체 실패 시 원래 사본을 복원합니다.
+- Claude 플러그인은 실행기가 연결된 마켓플레이스 clone을 먼저 패치합니다. `claude` 명령으로 플러그인 지침도 갱신하며, CLI가 없거나 실패해도 실행 코드 패치는 유지합니다. 새 지침은 Claude Code를 재시작하면 반영됩니다.
+- 다운로드·적용 실패 시 현재 버전으로 실행하고 5분 뒤 다음 `begin`에서 다시 확인합니다. `desk update`로 즉시 재시도할 수도 있습니다.
+- 자동 확인·패치를 끄려면 `DESK_AUTO_UPDATE=0`을 설정합니다. 기존 `DESK_UPDATE_CHECK=0`도 지원합니다. 직접 실행한 `desk update`는 이 설정과 무관하게 확인합니다.
+
+**0.2.1을 포함한 이전 설치본에는 자동 패치 코드가 없습니다.** 이번 0.3.0 이상으로 한 번 업데이트해야 이후부터 자동 패치됩니다. git 설치는 `git pull --ff-only`, 스킬 사본은 `npx skills update -g`, Claude 플러그인은 `/plugin`의 업데이트를 사용합니다. 변경 내용은 [Releases](https://github.com/zidell/desk-skill/releases)에 있습니다.
 
 ### 사용자가 할 일
 

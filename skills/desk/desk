@@ -17,6 +17,16 @@ set -u
 
 SELF=$(readlink -f "$0")
 DIR=$(dirname "$SELF")
+# Leave Bash before patching this file; the new process loads the patched entry.
+desk_entry_cmd="${1:-}"
+[ "$desk_entry_cmd" = -q ] && desk_entry_cmd="${2:-}"
+case "$desk_entry_cmd" in
+    begin|update)
+        if [ "${DESK_UPDATE_READY:-}" != "$DIR" ]; then
+            exec python3 -I "$DIR/desk-update.py" bootstrap "$DIR" "$@"
+        fi ;;
+esac
+unset DESK_UPDATE_READY
 export DESK_WIDGET="$DIR/widget.json"
 STATE="${DESK_STATE:-$HOME/.cache/desk}"
 BIN="$STATE/desk-helper"
@@ -1036,7 +1046,7 @@ case "$cmd" in
         else
             echo "제어 시작. 중지: 화면 하단 버튼 또는 ESC 한 번"
         fi
-        python3 -I "$DIR/desk-update.py" notice "$STATE" "$DIR" 2>/dev/null || true ;;
+        ;;
     end)
         if overlay_running; then
             desk_ending_pid=$(cat "$STATE/overlay.pid")
@@ -1127,6 +1137,7 @@ desk begin ['요청 요약']         제어 세션 시작 (하단 패널 표시,
 desk end                        제어 세션 끝 (패널 닫기)
 desk status | stop | log [N]    상태 / 사용자 대신 중지 / 지금까지 한 동작 기록
 desk install                    ~/.local/bin/desk·desk-ssh와 Claude Code·Codex·Agents 스킬 링크를 이 폴더로 연결
+desk update                     제어 세션이 없을 때 새 배포본을 즉시 확인·패치
 desk permissions [--request]    이 터미널 앱의 손쉬운 사용·화면 기록 권한 확인 (--request: 시스템 승인 창 띄우기)
 desk say '지금 하는 일'          동작 기록에 지금 하는 일을 한 줄 남김 ("메일에서 금액 찾는 중", "제출 버튼 누를 차례").
                                 패널은 기록의 최근 두 줄을 보인다(새 줄이 아래)
