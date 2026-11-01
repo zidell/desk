@@ -189,6 +189,16 @@ class UpdateTests(unittest.TestCase):
             update.git_update(repo / "skills/desk", "1.0.1")
         self.assertEqual((repo / "skills/desk/VERSION").read_text().strip(), "1.0.1")
 
+    def test_renamed_git_origins_keep_existing_installations_updatable(self):
+        repo, _, _ = self.make_repo()
+        for name in ("desk", "desk-skill"):
+            for origin in ("https://github.com/zidell/" + name + ".git",
+                           "git@github.com:zidell/" + name + ".git",
+                           "ssh://git@github.com/zidell/" + name + ".git"):
+                with self.subTest(origin=origin):
+                    update.git(repo, "remote", "set-url", "origin", origin)
+                    self.assertEqual(update.clean_repo(repo / "skills/desk"), repo)
+
     def test_git_dirty_fork_branch_and_local_commit_are_preserved(self):
         repo, remote, old = self.make_repo()
         for kind in ("dirty", "untracked", "fork", "branch", "ahead", "detached"):
@@ -240,16 +250,16 @@ class UpdateTests(unittest.TestCase):
         self.assertNotIn("-y", args)
         self.assertNotIn("install", args)
 
-    def codex_fixture(self):
+    def codex_fixture(self, marketplace="desk-skill", origin=None):
         home = self.base / ".codex"
-        previous = home / "plugins/cache/desk-skill/desk/1.0.0/skills/desk"
-        current = home / "plugins/cache/desk-skill/desk/1.0.1/skills/desk"
+        previous = home / f"plugins/cache/{marketplace}/desk/1.0.0/skills/desk"
+        current = home / f"plugins/cache/{marketplace}/desk/1.0.1/skills/desk"
         put(previous, tree("1.0.0"))
         put(current, tree("1.0.1"))
         put(current.parent.parent, {Path(".codex-plugin/plugin.json"): b'{"version":"1.0.1"}'})
-        listing = json.dumps({"installed": [{"pluginId": "desk@desk-skill", "marketplaceSource": {
-            "sourceType": "git", "source": update.REPO}}]})
-        installed = json.dumps({"pluginId": "desk@desk-skill", "version": "1.0.1",
+        listing = json.dumps({"installed": [{"pluginId": "desk@" + marketplace, "marketplaceSource": {
+            "sourceType": "git", "source": origin or update.REPO}}]})
+        installed = json.dumps({"pluginId": "desk@" + marketplace, "version": "1.0.1",
                                 "installedPath": str(current.parent.parent)})
         return previous, current, listing, installed
 
@@ -275,6 +285,16 @@ class UpdateTests(unittest.TestCase):
         commands = [c.args[0] for c in cli.call_args_list if c.args[0][0] == "codex"]
         self.assertEqual(commands[1][1:4], ["plugin", "marketplace", "upgrade"])
         self.assertEqual(commands[2][1:3], ["plugin", "add"])
+
+    def test_codex_new_and_legacy_marketplace_sources(self):
+        for marketplace in ("desk", "desk-skill"):
+            for origin in ("https://github.com/zidell/desk.git", "zidell/desk-skill"):
+                with self.subTest(marketplace=marketplace, origin=origin):
+                    previous, current, listing, installed = self.codex_fixture(marketplace, origin)
+                    with patch.object(update.shutil, "which", return_value="codex"), patch.object(update, "release_files", return_value=tree("1.0.0")), patch.object(update, "run", side_effect=[listing, "{}", installed]) as cli, patch.object(update, "refresh_plugin_links"):
+                        with contextlib.redirect_stdout(self.output):
+                            self.assertEqual(update.codex_update(previous, "1.0.1"), current)
+                    self.assertEqual(cli.call_args_list[2].args[0][3], "desk@" + marketplace)
 
     def test_codex_refuses_local_marketplace_and_modified_cache(self):
         previous, _, _, _ = self.codex_fixture()

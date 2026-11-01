@@ -19,8 +19,8 @@ import time
 import urllib.request
 import zipfile
 
-REPO = "https://github.com/zidell/desk-skill.git"
-URL = "https://raw.githubusercontent.com/zidell/desk-skill/main/skills/desk/VERSION"
+REPO = "https://github.com/zidell/desk.git"
+URL = "https://raw.githubusercontent.com/zidell/desk/main/skills/desk/VERSION"
 INTERVAL = 3600
 RETRY = 300
 LIMIT = 64 * 1024 * 1024
@@ -152,12 +152,25 @@ def git(root, *args, timeout=20):
     return run(["git", "-C", root, *args], timeout=timeout)
 
 
+def official_origin(origin, shorthand=False):
+    origin = origin.rstrip("/").removesuffix(".git")
+    allowed = {REPO.removesuffix(".git")}
+    # Keep installed clones and plugin sources from before the rename working.
+    for name in ("desk", "desk-skill"):
+        allowed.update(("https://github.com/zidell/" + name,
+                        "git@github.com:zidell/" + name,
+                        "ssh://git@github.com/zidell/" + name))
+        if shorthand:
+            allowed.add("zidell/" + name)
+    return origin in allowed
+
+
 def clean_repo(root):
     repo = root.parent.parent
     if not (repo / ".git").exists():
         raise Deferred("공식 git 설치가 아닙니다")
     origin = git(repo, "remote", "get-url", "origin").rstrip("/").removesuffix(".git")
-    if origin not in (REPO.removesuffix(".git"), "git@github.com:zidell/desk-skill", "ssh://git@github.com/zidell/desk-skill"):
+    if not official_origin(origin):
         raise Deferred("fork 또는 다른 원격 저장소는 자동으로 바꾸지 않습니다")
     if git(repo, "branch", "--show-current") != "main" or git(repo, "status", "--porcelain"):
         raise Deferred("로컬 수정 또는 별도 브랜치가 있어 자동 패치를 보류합니다")
@@ -198,7 +211,7 @@ def download(url):
 
 def release_files(number):
     version(number)
-    data = download("https://codeload.github.com/zidell/desk-skill/zip/refs/tags/v" + number)
+    data = download("https://codeload.github.com/zidell/desk/zip/refs/tags/v" + number)
     files = {}
     manifest = None
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -369,8 +382,7 @@ def codex_update(root, latest):
         raise Deferred("Codex 플러그인 설치를 확인하지 못했습니다")
     source = selected[0].get("marketplaceSource", {})
     origin = source.get("source", "").rstrip("/").removesuffix(".git")
-    if source.get("sourceType") != "git" or origin not in (
-            REPO.removesuffix(".git"), "zidell/desk-skill", "git@github.com:zidell/desk-skill"):
+    if source.get("sourceType") != "git" or not official_origin(origin, shorthand=True):
         raise Deferred("로컬 마켓플레이스 또는 fork는 자동으로 바꾸지 않습니다")
     run([executable, "plugin", "marketplace", "upgrade", marketplace, "--json"], timeout=60)
     installed = json.loads(run([executable, "plugin", "add", "desk@" + marketplace, "--json"], timeout=60))

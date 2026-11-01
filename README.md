@@ -85,18 +85,20 @@ Linux는 KDE Plasma(Wayland)와 X11을 지원합니다. GNOME 등 안전하게 �
 **Claude Code**에서 다음 두 명령을 입력합니다.
 
 ```text
-/plugin marketplace add zidell/desk-skill
-/plugin install desk@desk-skill
+/plugin marketplace add zidell/desk
+/plugin install desk@desk
 ```
 
 **Codex**에서는 다음 명령으로 설치합니다. 플러그인 관리 명령을 지원하는 최신 Codex가 필요합니다.
 
 ```sh
-codex plugin marketplace add zidell/desk-skill
-codex plugin add desk@desk-skill
+codex plugin marketplace add zidell/desk
+codex plugin add desk@desk
 ```
 
 Codex 데스크톱의 플러그인 목록에서도 추가한 `desk` 소스를 선택해 설치할 수 있습니다. 설치·갱신 뒤 새 대화에서 사용합니다. 이 레포에는 Claude용 `.claude-plugin`과 Codex용 `.codex-plugin` 매니페스트가 있고, 두 플러그인이 같은 `skills/desk`를 제공합니다. Codex 카탈로그 규격은 [공식 문서](https://developers.openai.com/plugins/build/plugins)를 따릅니다. 이 방식은 GitHub 마켓플레이스에서 설치하며, 공개 플러그인 디렉터리에 등록되었다는 뜻은 아닙니다.
+
+저장소와 마켓플레이스 이름은 0.4.1부터 `desk-skill`에서 `desk`로 바뀌었습니다. 이전 플러그인 설치를 새 이름으로 옮기려면 기존 `desk@desk-skill`을 제거한 뒤 위 설치 명령으로 `desk@desk`를 설치합니다. 이전 마켓플레이스 등록은 새 설치를 확인한 뒤 제거합니다. 기존 git 설치 폴더는 옮길 필요가 없으며, 자동 패치는 이전 원격 주소도 허용합니다.
 
 ### 개발용·직접 설치
 
@@ -106,20 +108,20 @@ Codex 데스크톱의 플러그인 목록에서도 추가한 `desk` 소스를 �
 
 1. 레포를 받습니다. 위치는 바꿔도 되며, 이후 명령의 경로만 맞추면 됩니다.
    ```sh
-   git clone https://github.com/zidell/desk-skill.git ~/.local/share/desk-skill                         # macOS·Linux
-   git clone https://github.com/zidell/desk-skill.git "$env:USERPROFILE\.local\share\desk-skill"     # Windows PowerShell
+   git clone https://github.com/zidell/desk.git ~/.local/share/desk                         # macOS·Linux
+   git clone https://github.com/zidell/desk.git "$env:USERPROFILE\.local\share\desk"     # Windows PowerShell
    ```
 2. 실행 명령과 스킬 링크를 설치합니다. `~/.local/bin/desk`(Windows는 `desk.exe`)를 만들고, `~/.claude/skills/desk`·`~/.codex/skills/desk`·`~/.agents/skills/desk`가 이 폴더를 가리키게 합니다. 다른 곳을 가리키던 링크는 교체하고, 링크가 아닌 파일·폴더는 건드리지 않습니다.
    ```sh
-   python3 ~/.local/share/desk-skill/skills/desk/desk.py install                       # macOS·Linux
-   py -3 -X utf8 "$env:USERPROFILE\.local\share\desk-skill\skills\desk\desk.py" setup   # Windows (pip 패키지 설치 포함)
+   python3 ~/.local/share/desk/skills/desk/desk.py install                       # macOS·Linux
+   py -3 -X utf8 "$env:USERPROFILE\.local\share\desk\skills\desk\desk.py" setup   # Windows (pip 패키지 설치 포함)
    ```
 3. `desk doctor`를 실행하고, `missing`·`disabled`·`→`로 표시된 항목을 사용자에게 안내합니다. OS 권한과 OS 패키지는 사용자가 직접 켜거나 설치합니다.
 4. 이후에는 작업 시작 시 자동으로 새 배포본을 패치합니다. 즉시 확인하려면 `desk update`(Windows는 `desk.exe update`)를 실행합니다. 폴더를 옮겼다면 2단계를 다시 실행합니다.
 
 스킬만 설치하는 방법도 지원합니다. 받은 스킬 폴더에서 에이전트가 2단계를 한 번 실행합니다.
 
-- `npx skills add zidell/desk-skill -g`: 스킬 폴더는 `~/.agents/skills/desk`입니다.
+- `npx skills add zidell/desk -g`: 스킬 폴더는 `~/.agents/skills/desk`입니다.
 
 ### 업데이트
 
@@ -132,9 +134,9 @@ desk는 작업을 시작하기 전(`begin`), 최대 한 시간에 한 번 GitHub
 - 다운로드·적용 실패 시 현재 버전으로 실행하고 5분 뒤 다음 `begin`에서 다시 확인합니다. `desk update`로 즉시 재시도할 수도 있습니다.
 - 자동 확인·패치를 끄려면 `DESK_AUTO_UPDATE=0`을 설정합니다. 기존 `DESK_UPDATE_CHECK=0`도 지원합니다. 직접 실행한 `desk update`는 이 설정과 무관하게 확인합니다.
 
-**0.2.1을 포함한 이전 설치본에는 자동 패치 코드가 없습니다.** 이번 0.3.0 이상으로 한 번 업데이트해야 이후부터 자동 패치됩니다. git 설치는 `git pull --ff-only`, 스킬 사본은 `npx skills update -g`, Claude 플러그인은 `/plugin`의 업데이트를 사용합니다. 변경 내용은 [Releases](https://github.com/zidell/desk-skill/releases)에 있습니다.
+**0.2.1을 포함한 이전 설치본에는 자동 패치 코드가 없습니다.** 이번 0.3.0 이상으로 한 번 업데이트해야 이후부터 자동 패치됩니다. git 설치는 `git pull --ff-only`, 스킬 사본은 `npx skills update -g`, Claude 플러그인은 `/plugin`의 업데이트를 사용합니다. 변경 내용은 [Releases](https://github.com/zidell/desk/releases)에 있습니다.
 
-Codex 플러그인 자동 패치는 **0.4.0부터** 지원합니다. 기존 Codex 플러그인은 한 번 `codex plugin marketplace upgrade desk-skill`과 `codex plugin add desk@desk-skill`로 갱신합니다.
+Codex 플러그인 자동 패치는 **0.4.0부터** 지원합니다.
 
 ### 사용자가 할 일
 
@@ -148,7 +150,7 @@ Codex 플러그인 자동 패치는 **0.4.0부터** 지원합니다. 기존 Code
 
 ## 기여
 
-버그 제보와 제안은 [Issues](https://github.com/zidell/desk-skill/issues)에 남겨 주세요. 코드를 고쳤다면 레포를 fork해서 PR을 보내 주세요. 에이전트에게 "이 수정으로 PR 보내줘"라고 하면 fork와 PR 생성까지 해 줍니다.
+버그 제보와 제안은 [Issues](https://github.com/zidell/desk/issues)에 남겨 주세요. 코드를 고쳤다면 레포를 fork해서 PR을 보내 주세요. 에이전트에게 "이 수정으로 PR 보내줘"라고 하면 fork와 PR 생성까지 해 줍니다.
 
 자기 기기에 맞게 고쳐 쓰려면 받은 clone을 직접 고치기보다 fork해서 쓰는 편이 낫습니다. clone을 고친 채로 두면 업데이트(`git pull`)가 충돌할 수 있습니다.
 

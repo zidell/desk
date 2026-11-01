@@ -1,13 +1,13 @@
 {
   "name": "desk",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "macOS·Windows·Linux에서 화면을 읽고 보이는 마우스와 키보드로 작업하는 데스크톱 제어 플러그인",
   "author": {
     "name": "zidell",
     "url": "https://github.com/zidell"
   },
-  "homepage": "https://github.com/zidell/desk-skill",
-  "repository": "https://github.com/zidell/desk-skill",
+  "homepage": "https://github.com/zidell/desk",
+  "repository": "https://github.com/zidell/desk",
   "license": "MIT",
   "keywords": ["computer-use", "desktop", "automation", "ocr", "accessibility", "macos", "windows", "linux"],
   "skills": "./skills/"

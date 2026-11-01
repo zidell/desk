@@ -16,6 +16,8 @@
 - 다운로드·검증·적용 실패는 현재 코드로 실행하고 5분 뒤 재확인한다. subprocess 출력은 에이전트로 내보내지 않는다. 화면·사용자 데이터는 전송하지 않는다.
 - 이전 0.2.1 설치본에는 자동 패치 실행 코드가 없으므로 0.3.0 이상으로 한 번 수동 업데이트해야 한다.
 
+- 0.4.1부터 공식 저장소는 `zidell/desk`, 신규 마켓플레이스는 `desk`다. Git 원격·Codex Git 소스 판정은 이전 `zidell/desk-skill`도 허용한다. 기존 마켓플레이스 ID는 설치 경로에서 읽으며 코드가 임의로 바꾸지 않는다. 새 이름으로 전환하려면 이전 플러그인을 제거하고 `desk@desk`를 설치한다. 기존 clone 경로·스킬 링크는 옮기지 않는다.
+
 ## 재검증
 
 - 화면·입력을 건드리지 않는 공통 회귀: `PYTHONPYCACHEPREFIX=~/.cache/desk/pycache python3 skills/desk/tests/test_update.py -v`.
