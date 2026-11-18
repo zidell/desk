@@ -198,7 +198,17 @@ static class Native {
             // Enumeration and hit-testing can return different nodes for the
             // same pixels. Bind the current hit target before moving, then
             // retain its identity through GuardPress at mouse-down.
-            if(plan.observedBinding==null||!BindingEqual(plan.observedBinding,binding)){using(var original=new Bitmap(plan.pixels)){if(original.Size!=crop.Size)throw new DeskError(6,"클릭 영역 크기가 바뀌었습니다.");for(int py=0;py<crop.Height;py++)for(int px=0;px<crop.Width;px++)if(original.GetPixel(px,py).ToArgb()!=crop.GetPixel(px,py).ToArgb())throw new DeskError(6,"클릭 대상 화면이 바뀌었습니다.");}}
+            if(plan.observedBinding==null||!BindingEqual(plan.observedBinding,binding)){
+                int tolerance=new WidgetStyle().N("clickPixelTolerance");
+                using(var original=new Bitmap(plan.pixels)){
+                    if(original.Size!=crop.Size)throw new DeskError(6,"클릭 영역 크기가 바뀌었습니다.");
+                    for(int py=0;py<crop.Height;py++)for(int px=0;px<crop.Width;px++){
+                        var a=original.GetPixel(px,py);var b=crop.GetPixel(px,py);
+                        if(Math.Abs((int)a.R-b.R)>tolerance||Math.Abs((int)a.G-b.G)>tolerance||Math.Abs((int)a.B-b.B)>tolerance)
+                            throw new DeskError(6,"클릭 대상 화면이 바뀌었습니다.");
+                    }
+                }
+            }
             crop.Save(armed,ImageFormat.Png);
         }
         Write("click-guard.json",json.Serialize(new ClickToken(){point=plan.point,box=plan.box,pixels=armed,binding=binding,inputEpoch=plan.inputEpoch}));

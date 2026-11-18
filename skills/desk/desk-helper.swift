@@ -1451,7 +1451,7 @@ func clickCapture(_ file: String, _ box: [Int]) {
     do { try task.run(); task.waitUntilExit() } catch { clickAbort("클릭 전 화면 캡처 실패") }
     if task.terminationStatus != 0 { clickAbort("클릭 전 화면 캡처 실패") }
 }
-func clickPixels(_ file: String) -> Data? {
+func clickPixels(_ file: String) -> (bytes: Data, width: Int, height: Int)? {
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)),
           let rep = NSBitmapImageRep(data: data), let image = rep.cgImage else { return nil }
     let w = image.width, h = image.height
@@ -1462,11 +1462,27 @@ func clickPixels(_ file: String) -> Data? {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
         context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h)); return true
     }
-    return drawn ? bytes : nil
+    return drawn ? (bytes, w, h) : nil
+}
+func matchingClickPixels(_ left: Data, _ right: Data, tolerance: Int) -> Bool {
+    guard left.count == right.count else { return false }
+    return left.withUnsafeBytes { (a: UnsafeRawBufferPointer) in
+        right.withUnsafeBytes { (b: UnsafeRawBufferPointer) in
+            for i in stride(from: 0, to: a.count, by: 4) {
+                for channel in 0..<3 {
+                    if abs(Int(a[i + channel]) - Int(b[i + channel])) > tolerance { return false }
+                }
+            }
+            return true
+        }
+    }
 }
 func equalClickPixels(_ a: String, _ b: String, _ box: [Int]) -> Bool {
-    guard var left = clickPixels(a), var right = clickPixels(b), left.count == right.count else { return false }
-    if left == right { return true }
+    guard let original = clickPixels(a), let current = clickPixels(b),
+          original.width == current.width, original.height == current.height else { return false }
+    var left = original.bytes, right = current.bytes
+    let tolerance = Int(WidgetStyle().number("clickPixelTolerance"))
+    if matchingClickPixels(left, right, tolerance: tolerance) { return true }
     // Use the accessibility API's actual insertion caret, never a guessed text-field mask.
     guard let element = clickElement, let caret = caretFrame(element),
           let data = try? Data(contentsOf: URL(fileURLWithPath: b)),
@@ -1482,7 +1498,7 @@ func equalClickPixels(_ a: String, _ b: String, _ box: [Int]) -> Bool {
         let i = ((image.pixelsHigh - 1 - y) * image.pixelsWide + x) * 4
         for channel in 0..<4 { left[i + channel] = 0; right[i + channel] = 0 }
     } }
-    return left == right
+    return matchingClickPixels(left, right, tolerance: tolerance)
 }
 func guardMouseDown(_ p: CGPoint) {
     holdClick(p)

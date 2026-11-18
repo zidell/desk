@@ -13,6 +13,15 @@ import sys
 import time
 import uuid
 
+PIXEL_TOLERANCE = json.loads(Path(__file__).with_name("widget.json").read_text())["clickPixelTolerance"]
+
+
+def matching_pixels(old, new):
+    """Ignore bounded capture color noise, never the fraction of changed pixels."""
+    from PIL import ImageChops
+    return old.size == new.size and all(
+        high <= PIXEL_TOLERANCE for _, high in ImageChops.difference(old, new).getextrema())
+
 
 class StaleClick(Exception):
     pass
@@ -92,11 +101,11 @@ def save_crop(image, region, box, out):
 
 
 def same_pixels(reference, current, current_region, box):
-    from PIL import Image, ImageChops
+    from PIL import Image
     with Image.open(reference) as source:
         old=source.convert("RGB")
     new=crop(current,current_region,box)
-    return old.size==new.size and ImageChops.difference(old,new).getbbox() is None
+    return matching_pixels(old,new)
 
 
 def same_binding(a, b):
@@ -153,7 +162,7 @@ def verify_initial(token, image, region, binding):
     if known is not None and binding is not None and same_binding(known,binding):
         return  # same native control and exact frame; caret/hover paint can legitimately differ
     if binding and binding.get("caret"):
-        from PIL import Image, ImageChops, ImageDraw
+        from PIL import Image, ImageDraw
         old=Image.open(token["pixels"]).convert("RGB")
         new=crop(image,region,token["box"])
         if old.size==new.size:
@@ -163,7 +172,7 @@ def verify_initial(token, image, region, binding):
                 rect=(math.floor((caret[0]-token["box"][0])*sx),math.floor((caret[1]-token["box"][1])*sy),
                       math.ceil((caret[0]+caret[2]-token["box"][0])*sx)-1,math.ceil((caret[1]+caret[3]-token["box"][1])*sy)-1)
                 ImageDraw.Draw(old).rectangle(rect,fill="black");ImageDraw.Draw(new).rectangle(rect,fill="black")
-                if ImageChops.difference(old,new).getbbox() is None:return
+                if matching_pixels(old,new):return
     raise StaleClick("읽은 뒤 클릭 대상 화면이 바뀌었습니다(로딩·리플로우 가능). 클릭하지 않고 멈춥니다.")
 
 

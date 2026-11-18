@@ -26,6 +26,7 @@
   "scanHoldMilliseconds": 2500,
   "scanFadeMilliseconds": 350,
   "userPointerThresholdPixels": 10,
+  "clickPixelTolerance": 3,
   "cursorPointsPerSecond": 1400,
   "cursorFrameMilliseconds": 8,
   "clickRippleMilliseconds": 300,
