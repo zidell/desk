@@ -22,6 +22,14 @@
 #include <xkb.h>
 #include <linux/input-event-codes.h>
 using namespace KWin;
+// KWin 6.8 added an `autoscroll` argument to processAxis; support both signatures.
+template<typename Pointer>
+static void wheelAxis(Pointer *pointer,PointerAxis axis,qreal delta,qint32 v120,std::chrono::microseconds time){
+    if constexpr(requires{pointer->processAxis(axis,delta,v120,PointerAxisSource::Wheel,false,false,time);})
+        pointer->processAxis(axis,delta,v120,PointerAxisSource::Wheel,false,false,time);
+    else
+        pointer->processAxis(axis,delta,v120,PointerAxisSource::Wheel,false,time);
+}
 class Guard : public QObject, public InputEventFilter {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.desk.Guard")
@@ -156,8 +164,8 @@ public Q_SLOTS:
     }
     bool Scroll(double dx,double dy,QString expected,QString generation){
         if(!allowed(expected,generation))return false;injecting=true;
-        if(dy)input()->pointer()->processAxis(PointerAxis::Vertical,dy*15,int(dy*120),PointerAxisSource::Wheel,false,now());
-        if(dx)input()->pointer()->processAxis(PointerAxis::Horizontal,dx*15,int(dx*120),PointerAxisSource::Wheel,false,now());
+        if(dy)wheelAxis(input()->pointer(),PointerAxis::Vertical,dy*15,int(dy*120),now());
+        if(dx)wheelAxis(input()->pointer(),PointerAxis::Horizontal,dx*15,int(dx*120),now());
         input()->pointer()->processFrame();
         injecting=false;return true;
     }
