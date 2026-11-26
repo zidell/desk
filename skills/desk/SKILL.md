@@ -186,6 +186,7 @@ Mac MLX와 Windows PyTorch 모델의 품질·언어 범위는 별개다.
 - 글자: `read --window`, `find '글자' [--full]`, `wait-for '글자' [초] [--gone]`
 - 클릭: `click-text '이름' [N]`, `click-el 번호`, `click X Y`, `dclick X Y`, `rclick X Y`
 - 드래그·스크롤: `drag X Y X2 Y2`, `scroll X Y down 5`
+  KDE Wayland의 두 손가락 스크롤·경계 페이지 이동 검증은 `touch-scroll X Y left|right|up|down DELTA [MS]`를 쓴다. 휠 스크롤과 구분하며 DELTA는 축 입력 단위다.
 - 호버 등 이동 자체가 목적일 때만: `move X Y` (클릭의 사전 단계로 사용하지 않음)
 - 입력: `key primary+l`, `type '텍스트'`, `type --keys 'ASCII'`. macOS의 단일 키 길게 누르기: `key f 1000`(15~2000ms). 중지·사용자 개입·앱 변경 때도 keyup을 보내고 취소한다.
 - Windows 행동 묶음: `sequence '[{"kind":"click","args":[100,200]},{"kind":"type","text":"검색어"},{"kind":"key","args":["return"]}]'`

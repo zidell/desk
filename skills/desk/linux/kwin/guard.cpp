@@ -21,6 +21,7 @@
 #include <wayland_server.h>
 #include <xkb.h>
 #include <linux/input-event-codes.h>
+#include <cmath>
 using namespace KWin;
 // KWin 6.8 added an `autoscroll` argument to processAxis; support both signatures.
 template<typename Pointer>
@@ -29,6 +30,13 @@ static void wheelAxis(Pointer *pointer,PointerAxis axis,qreal delta,qint32 v120,
         pointer->processAxis(axis,delta,v120,PointerAxisSource::Wheel,false,false,time);
     else
         pointer->processAxis(axis,delta,v120,PointerAxisSource::Wheel,false,time);
+}
+template<typename Pointer>
+static void fingerAxis(Pointer *pointer,PointerAxis axis,qreal delta,std::chrono::microseconds time){
+    if constexpr(requires{pointer->processAxis(axis,delta,0,PointerAxisSource::Finger,false,false,time);})
+        pointer->processAxis(axis,delta,0,PointerAxisSource::Finger,false,false,time);
+    else
+        pointer->processAxis(axis,delta,0,PointerAxisSource::Finger,false,time);
 }
 class Guard : public QObject, public InputEventFilter {
     Q_OBJECT
@@ -40,12 +48,14 @@ class Guard : public QObject, public InputEventFilter {
     double threshold=10;
     QElapsedTimer lease;
     QSet<uint> keys, buttons;
+    int touchAxis=-1;
     static auto now(){return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch());}
     bool live() const {return armed && lease.isValid() && lease.elapsed()<3000;}
     bool locked() const {return waylandServer() && waylandServer()->isScreenLocked();}
     void write(const QString &name,const QByteArray &data){QFile f(state+"/"+name);if(f.open(QIODevice::WriteOnly|QIODevice::Truncate))f.write(data);}
     void activity(bool generatedPointer=false){if(!live())return;++epoch;if(!generatedPointer)++userEpoch;write("user-input",QByteArray::number(epoch));}
-    void release(){injecting=true;for(auto k:keys)input()->keyboard()->processKey(k,KeyboardKeyState::Released,now());for(auto b:buttons)input()->pointer()->processButton(b,PointerButtonState::Released,now());input()->pointer()->processFrame();keys.clear();buttons.clear();injecting=false;}
+    void endTouch(){if(touchAxis>=0){fingerAxis(input()->pointer(),touchAxis==0?PointerAxis::Horizontal:PointerAxis::Vertical,0,now());input()->pointer()->processFrame();touchAxis=-1;}}
+    void release(){injecting=true;endTouch();for(auto k:keys)input()->keyboard()->processKey(k,KeyboardKeyState::Released,now());for(auto b:buttons)input()->pointer()->processButton(b,PointerButtonState::Released,now());input()->pointer()->processFrame();keys.clear();buttons.clear();injecting=false;}
     void stop(){if(!armed)return;write("stopped","physical ESC or safety stop\n");armed=false;release();}
     QJsonObject window() const {
         auto w=workspace()->activeWindow();if(!w)return {};
@@ -168,6 +178,21 @@ public Q_SLOTS:
         if(dx)wheelAxis(input()->pointer(),PointerAxis::Horizontal,dx*15,int(dx*120),now());
         input()->pointer()->processFrame();
         injecting=false;return true;
+    }
+    bool TouchScroll(int axis,double delta,bool finish,QString expected,QString generation){
+        if(finish){
+            if(touchAxis<0)return true;
+            injecting=true;endTouch();injecting=false;return true;
+        }
+        if((axis!=0&&axis!=1)||!std::isfinite(delta)||delta==0||std::abs(delta)>120||
+           (touchAxis>=0&&touchAxis!=axis)||!allowed(expected,generation))return false;
+        // The visible pointer must still be over the expected app or its popup.
+        auto focus=input()->pointer()->focus(),active=workspace()->activeWindow();bool family=false;
+        for(int i=0;focus&&i<16;++i,focus=focus->transientFor())if(focus==active){family=true;break;}
+        if(!family)return false;
+        touchAxis=axis;injecting=true;
+        fingerAxis(input()->pointer(),axis==0?PointerAxis::Horizontal:PointerAxis::Vertical,delta,now());
+        input()->pointer()->processFrame();injecting=false;return true;
     }
 };
 class Extension : public QQmlExtensionPlugin {

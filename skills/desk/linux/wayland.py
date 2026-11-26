@@ -78,8 +78,9 @@ class Wayland:
         script_id = scripting.loadDeclarativeScript(str(qml), self.script_name, signature="ss")
         if script_id < 0:
             raise RuntimeError("KWin 안전 어댑터를 로드하지 못했습니다")
-        obj = self.bus.get_object("org.kde.KWin", "/Scripting/Script" + str(script_id))
-        self.dbus.Interface(obj, "org.kde.kwin.Script").run()
+        # Removed ScriptN D-Bus objects may outlive their numeric IDs. Start
+        # through the manager so a reused ID cannot run a different script.
+        scripting.start()
         for _ in range(100):
             try:
                 g = self.dbus.Interface(self.bus.get_object("org.kde.KWin", "/DeskGuard",introspect=False), "org.desk.Guard")
@@ -265,6 +266,9 @@ class Wayland:
 
     def scroll(self, dx, dy, window):
         return bool(self.guard.Scroll(float(dx), float(dy), *self.context(window)))
+
+    def touch_scroll(self, axis, delta, finish, window):
+        return bool(self.guard.TouchScroll(int(axis), float(delta), bool(finish), *self.context(window)))
 
     def close(self):
         if self.guard:

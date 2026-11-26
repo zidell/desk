@@ -18,6 +18,48 @@ E=importlib.util.module_from_spec(spec);spec.loader.exec_module(E)
 
 
 class Evidence(unittest.TestCase):
+    def touch_session(self):
+        from types import SimpleNamespace
+        import desk_linux
+        session=object.__new__(desk_linux.Session)
+        session.check=lambda:None;session.show_message=lambda *_:None;session.idle=lambda:None
+        window={"id":"test-window","epoch":"0"}
+        session.expected=window;session.current=lambda *_:window
+        session.move=lambda *_:None;session.pump=lambda *_:None;session.after=lambda *_:"done"
+        calls=[]
+        session.backend=SimpleNamespace(touch_scroll=lambda *args:calls.append(args) or True)
+        return session,calls
+
+    def test_touch_scroll_user_intervention_ends_started_axis(self):
+        import desk_linux
+        session,calls=self.touch_session();checks=0
+        def current(*_):
+            nonlocal checks
+            checks+=1
+            if checks==3:raise desk_linux.DeskError(6,"user input changed")
+            return session.expected
+        session.current=current
+        with self.assertRaises(desk_linux.DeskError) as raised:
+            session.dispatch(["touch-scroll","100","100","left","40","400"])
+        self.assertEqual(raised.exception.code,6)
+        self.assertEqual(len(calls),2)
+        self.assertFalse(calls[0][2]);self.assertEqual(calls[-1][:3],(0,0,True))
+
+    def test_touch_scroll_nonfinite_and_excessive_inputs_refused(self):
+        import desk_linux
+        for distance,duration in (("nan","400"),("-1","400"),("2401","400"),("40","inf"),("40","79"),("40","2001")):
+            session,calls=self.touch_session()
+            with self.assertRaises(desk_linux.DeskError) as raised:
+                session.dispatch(["touch-scroll","100","100","right",distance,duration])
+            self.assertEqual(raised.exception.code,2);self.assertEqual(calls,[])
+
+    def test_touch_scroll_backend_without_touch_support_refused(self):
+        import desk_linux
+        session,calls=self.touch_session();session.backend=object()
+        with self.assertRaises(desk_linux.DeskError) as raised:
+            session.dispatch(["touch-scroll","100","100","right","40"])
+        self.assertEqual(raised.exception.code,2);self.assertEqual(calls,[])
+
     def setUp(self):
         from PIL import Image,ImageDraw
         self.directory=tempfile.TemporaryDirectory();self.state=Path(self.directory.name)

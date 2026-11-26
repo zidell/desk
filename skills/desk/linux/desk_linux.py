@@ -653,6 +653,24 @@ class Session:
                     raise DeskError(6,"조합 이동 중 대상 창 또는 사용자 입력이 바뀌었습니다")
                 return self.after(current)
             x,y=map(float,args);self.move(x,y,window);CLICK.invalidate(STATE);self.observation=None;return "커서 이동 완료"
+        if command=="touch-scroll":
+            if len(args) not in (4,5):raise DeskError(2,"desk touch-scroll X Y up|down|left|right DELTA [MS]")
+            if not hasattr(self.backend,"touch_scroll"):raise DeskError(2,"트랙패드 스크롤 입력은 KDE Wayland에서만 지원합니다")
+            x,y=map(float,args[:2]);direction=args[2];distance=float(args[3]);duration=float(args[4]) if len(args)>4 else 400
+            if direction not in ("up","down","left","right") or not all(map(math.isfinite,(x,y,distance,duration))) or not 0<distance<=2400 or not 80<=duration<=2000:
+                raise DeskError(2,"방향·거리를 확인하세요: 0 < DELTA <= 2400, 80 <= MS <= 2000")
+            self.idle();window=self.current(self.expected) if self.expected else self.current();self.move(x,y,window)
+            axis=0 if direction in ("left","right") else 1
+            steps=max(math.ceil(duration/16),math.ceil(distance/120))
+            delta=distance/steps*(-1 if direction in ("left","up") else 1)
+            try:
+                for _ in range(steps):
+                    self.current(window)
+                    self.require(self.backend.touch_scroll(axis,delta,False,window))
+                    self.pump(duration/steps/1000)
+            finally:
+                self.backend.touch_scroll(axis,0,True,window)
+            return self.after(window)
         if command=="scroll":
             if len(args) not in (3,4):raise DeskError(2,"desk scroll X Y up|down|left|right [N]")
             x,y=map(float,args[:2]);direction=args[2]
@@ -758,6 +776,7 @@ desk see | look | front | shot [--full|--region x,y,w,h] | read [--window]
 desk click|dclick|rclick X Y | click-el N [--force] | click-text '이름' [N] [--force]
 desk key primary+l | type '텍스트' | move X Y | drag X Y X2 Y2
 desk scroll X Y up|down|left|right [N] | find '글자' | wait-for '글자' [초] [--gone]
+desk touch-scroll X Y up|down|left|right DELTA [MS] : KDE Wayland 트랙패드 스크롤
 desk windows | open --id 창ID | open 앱.desktop|URL|파일 | handoff '안내' [초] | wait 초 | log [N]
 desk -q 명령 … : 중간 입력 뒤 결과 캡처 생략. 다음 좌표 클릭 전 새 see/shot 필요.
 Linux: KDE Wayland / X11 자동 선택. KDE 캡처는 Spectacle, 패널은 LayerShellQt.
