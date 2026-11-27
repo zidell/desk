@@ -123,18 +123,41 @@ def cleanup(route, socket_path):
     shutil.rmtree(Path(socket_path).parent, ignore_errors=True)
 
 
-def client(args):
-    route = None
+def current_route():
     for directory in [Path.cwd(), *Path.cwd().parents]:
         candidate = route_path(directory)
         if candidate.is_file():
-            route = json.loads(candidate.read_text())
-            break
+            return json.loads(candidate.read_text())
+    return None
+
+
+class UnavailableClient(ConnectionError):
+    pass
+
+
+def auto(args):
+    # A connected visible client takes priority, even on a server with a monitor.
+    if current_route() is not None:
+        try:
+            return client(args)
+        except UnavailableClient:
+            pass
+    local = ROOT / "desk-local"
+    if not local.exists():
+        raise ValueError("연결된 클라이언트와 이 기기의 로컬 desk 실행기가 없습니다")
+    os.execv(str(local), [str(local), *args])
+
+
+def client(args):
+    route = current_route()
     if route is None:
         raise ValueError("이 프로젝트에 연결된 클라이언트가 없습니다. 클라이언트에서 vs/wh로 다시 접속하세요")
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(600)
-        sock.connect(route["socket"])
+        try:
+            sock.connect(route["socket"])
+        except (FileNotFoundError, ConnectionRefusedError) as exc:
+            raise UnavailableClient("클라이언트 연결이 종료됐습니다") from exc
         send(sock, args or ["bridge-info"])
         reply = receive(sock)
     output = reply["output"]
@@ -170,6 +193,22 @@ def bootstrap(payload):
         raise ValueError("기존 desk-client 실행기를 덮어쓰지 않습니다")
     launcher.write_text(text)
     launcher.chmod(0o700)
+    desk = launcher.with_name("desk")
+    dispatcher = '#!/bin/sh\n# desk SSH client dispatcher\nexec python3 "$HOME/.local/share/desk-client/desk-tunnel.py" auto "$@"\n'
+    if not desk.exists() or desk.read_bytes() != dispatcher.encode():
+        if desk.exists():
+            import shutil
+            local = base / "desk-local"
+            if local.is_symlink() or local.exists():
+                local.unlink()
+            if desk.is_symlink():
+                local.symlink_to(desk.resolve())
+            else:
+                shutil.copy2(desk, local)
+        if desk.is_symlink():
+            desk.unlink()
+        desk.write_text(dispatcher)
+        desk.chmod(0o700)
     for agent in [".codex", ".claude", ".agents"]:
         link = Path.home() / agent / "skills/desk-client"
         link.parent.mkdir(parents=True, exist_ok=True)
@@ -204,7 +243,7 @@ def connect(server, directory, check=False, remote_args=None):
     skill = skill.replace("name: desk\n", "name: desk-client\n", 1)
     skill = skill.replace("description: ", "description: SSH 개발서버에서 접속한 클라이언트 화면을 조작할 때 사용한다. ", 1)
     end = skill.index("---", 3) + 3
-    note = "\n\n# SSH 클라이언트 화면 중계\n\n이 스킬의 대상은 서버가 아니라 현재 프로젝트에 SSH로 접속한 클라이언트다. 아래 모든 `desk` 명령을 **`desk-client`로 호출**한다. 먼저 `desk-client bridge-info`와 `desk-client doctor`로 대상을 확인한다. 그림 경로는 서버에 자동 복사되므로 해당 경로를 연다. 연결 오류 때 서버의 로컬 desk로 대신 실행하지 않는다. ESC 종료 코드 3을 그대로 지킨다. 설치·권한 변경은 클라이언트의 로컬 에이전트에 요청한다.\n"
+    note = "\n\n# 화면 대상 자동 선택\n\n아래 명령은 그대로 **`desk`로 호출**한다. 현재 프로젝트에 연결된 클라이언트가 있으면 그 화면을, 없으면 이 기기의 로컬 desk를 사용한다. 먼저 `desk doctor`로 대상 환경을 확인한다. 연결 클라이언트는 `desk bridge-info`로 확인할 수 있다. 그림 경로는 서버에 자동 복사되므로 해당 경로를 연다. 대상이 바뀌면 새 화면을 읽고 판단하며 이전 대상의 좌표·요소 번호를 재사용하지 않는다. ESC 종료 코드 3을 그대로 지킨다.\n"
     skill = skill[:end] + note + skill[end:]
     payload = dict(directory=directory, files={"desk-tunnel.py": base64.b64encode(source.encode()).decode(), "SKILL.md": base64.b64encode(skill.encode()).decode()})
     # Execute the bootstrap function in its own namespace.
@@ -222,7 +261,7 @@ def connect(server, directory, check=False, remote_args=None):
             thread = threading.Thread(target=rpc.serve_forever, daemon=True)
             thread.start()
             if check or remote_args:
-                command = 'cd -- ' + shlex.quote(directory) + ' && "$HOME/.local/bin/desk-client" ' + shlex.join(remote_args or ["doctor"])
+                command = 'cd -- ' + shlex.quote(directory) + ' && "$HOME/.local/bin/desk" ' + shlex.join(remote_args or ["doctor"])
                 tty = []
             else:
                 command = "exec \"$SHELL\" -lic " + shlex.quote("cd -- " + shlex.quote(directory) + " && z")
@@ -244,6 +283,8 @@ def connect(server, directory, check=False, remote_args=None):
 
 
 def main():
+    if sys.argv[1:2] == ["auto"]:
+        return auto(sys.argv[2:])
     if sys.argv[1:2] == ["cleanup"]:
         cleanup(*sys.argv[2:])
         return 0

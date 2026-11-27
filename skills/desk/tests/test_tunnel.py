@@ -127,6 +127,10 @@ class TunnelTests(unittest.TestCase):
             native = home / ".codex/skills/desk"
             native.mkdir(parents=True)
             (native / "SKILL.md").write_text("existing native skill")
+            original = home / ".local/bin/desk"
+            original.parent.mkdir(parents=True)
+            original.write_text("#!/bin/sh\necho native\n")
+            original.chmod(0o700)
             sessions = [home / "s1", home / "s2"]
             for session in sessions:
                 session.mkdir(mode=0o700)
@@ -136,6 +140,8 @@ class TunnelTests(unittest.TestCase):
             with patch.object(Path, "home", return_value=home), patch.object(tunnel.tempfile, "mkdtemp", side_effect=[str(s) for s in sessions]), patch("sys.stdout", new_callable=StringIO):
                 tunnel.bootstrap(payload)
                 tunnel.bootstrap(payload)
+                self.assertIn("auto", original.read_text())
+                self.assertEqual((home / ".local/share/desk-client/desk-local").read_text(), "#!/bin/sh\necho native\n")
                 route = tunnel.route_path(project)
                 tunnel.cleanup(str(route), str(sessions[0] / "s"))
                 self.assertEqual(json.loads(route.read_text())["socket"], str(sessions[1] / "s"))
@@ -144,6 +150,43 @@ class TunnelTests(unittest.TestCase):
                 self.assertIn("name: desk\n", (home / ".claude/skills/desk/SKILL.md").read_text())
                 tunnel.cleanup(str(route), str(sessions[1] / "s"))
                 self.assertFalse(route.exists())
+
+    def test_auto_uses_client_even_with_server_screen(self):
+        with patch.object(tunnel, "current_route", return_value={"socket": "connected"}), patch.object(tunnel, "client", return_value=3) as client, patch.dict(os.environ, {"DISPLAY": ":0"}, clear=True):
+            self.assertEqual(tunnel.auto(["see"]), 3)
+            client.assert_called_once_with(["see"])
+
+    def test_auto_ssh_without_route_uses_native_driver(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            native = root / "desk-local"
+            native.write_text("native")
+            with patch.object(tunnel, "ROOT", root), patch.object(tunnel, "current_route", return_value=None), patch.dict(os.environ, {"SSH_CONNECTION": "test connection", "DISPLAY": ":0"}, clear=True), patch.object(os, "execv") as execute:
+                tunnel.auto(["doctor"])
+                execute.assert_called_once_with(str(native), [str(native), "doctor"])
+
+    def test_auto_dead_route_uses_native_but_never_replays_sent_commands(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "desk-local").write_text("native")
+            with patch.object(tunnel, "ROOT", root), patch.object(tunnel, "current_route", return_value={"socket": "old"}), patch.object(os, "execv") as execute:
+                with patch.object(tunnel, "client", side_effect=tunnel.UnavailableClient()):
+                    tunnel.auto(["doctor"])
+                    execute.assert_called_once()
+                execute.reset_mock()
+                with patch.object(tunnel, "client", side_effect=ConnectionError("response lost")):
+                    with self.assertRaises(ConnectionError):
+                        tunnel.auto(["click", "1", "1"])
+                    execute.assert_not_called()
+
+    def test_auto_local_without_ssh_preserves_native_driver(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            native = root / "desk-local"
+            native.write_text("native")
+            with patch.object(tunnel, "ROOT", root), patch.object(tunnel, "current_route", return_value=None), patch.dict(os.environ, {}, clear=True), patch.object(os, "execv") as execute:
+                tunnel.auto(["doctor"])
+                execute.assert_called_once_with(str(native), [str(native), "doctor"])
 
 
 if __name__ == "__main__":

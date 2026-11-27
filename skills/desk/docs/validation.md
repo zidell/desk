@@ -7,7 +7,8 @@ OS별로 실제로 확인한 환경과 결과, 아직 확인하지 않은 조건
 
 | 변경 | macOS | Windows | Linux |
 |---|---|---|---|
-| SSH 역방향 Unix 소켓의 클라이언트 desk 중계(`desk-tunnel.py`) | 직접 실행 — Mac mini에서 전송·경로·재접속 정리 회귀 8개 통과, Linux 클라이언트 doctor·가린 그림 수신. Mac GUI 클라이언트의 화면 조작 미검증 | 지원 대상 아님(기존 로컬 desk는 변경 없음) | 직접 실행 — 회귀 8개, ThinkPad KDE Wayland에서 Ubuntu·Mac mini 왕복 doctor·가린 화면 전달. Ubuntu의 vs·pai·vai·tyle·newsimage와 Mac mini의 wh 경로 연결, 종료 후 거부·기록 정리 확인. 실제 클릭·키 입력은 하지 않음 |
+| `desk` 자동 대상 선택: 연결 클라이언트 우선, 연결이 없으면 실행 기기의 로컬 desk | 직접 실행 — 전송 회귀 12개. Mac mini의 desk가 연결 중 ThinkPad doctor를 반환하고 연결 종료 후 macOS doctor를 반환함. Mac GUI 클라이언트 입력 미검증 | 지원 대상 아님(기존 로컬 desk 변경 없음) | 직접 실행 — 로컬 desk doctor, 5개 프로젝트의 서버 desk 대상 확인, 회귀 12개. 로컬·SSH 환경변수 유무·종료된 소켓의 로컬 선택 및 이미 보낸 명령의 재실행 방지 확인 |
+| SSH 역방향 Unix 소켓의 클라이언트 desk 중계(`desk-tunnel.py`) | 직접 실행 — Mac mini에서 전송·경로·재접속 정리 회귀 12개 통과, Linux 클라이언트 doctor·가린 그림 수신. Mac GUI 클라이언트의 화면 조작 미검증 | 지원 대상 아님(기존 로컬 desk는 변경 없음) | 직접 실행 — 회귀 12개, ThinkPad KDE Wayland에서 Ubuntu·Mac mini 왕복 doctor·가린 화면 전달. Ubuntu의 vs·pai·vai·tyle·newsimage와 Mac mini의 wh 경로 연결, 종료 후 거부·기록 정리 확인. 실제 클릭·키 입력은 하지 않음 |
 | RGB 채널별 미세한 캡처 차이 허용(공통 설정 3/255), 실제 대상 변경 검증 유지 | 직접 실행 — 공통·실제 Swift 비교 회귀 10개 통과, Swift 전체 빌드, 격리 상태의 Device Hub 메뉴 클릭·드래그 성공. 안내 문구 실제 출현·변화는 거부 | 코드만 — C# 재빌드·실제 입력 미검증 | 공통 Python 비교 경로 적용, 실제 Linux 입력 미검증 |
 | 기존 브라우저 창·탭·로그인 세션 재사용, 새 창·시크릿·별도 세션 제한 지침 | 지침·실행 경로 검토만, 화면 조작 미검증 | 지침·실행 경로 검토만, 화면 조작 미검증 | 기존 창 목록·창 ID 전환 직접 실행. 새 지침으로 전체 웹 작업 재검증은 하지 않음 |
 | 원격 클라이언트 요청문 전달 지침 | 지침 검토, Mac 서버→ThinkPad 클립보드 전달·사용자 붙여넣기 확인. 로컬 desk 실행·결과 회수는 미검증 | 지침 검토만 | 지침 검토, ThinkPad에서 클립보드 수신 확인. 로컬 desk 실행·결과 회수는 미검증 |
