@@ -31,6 +31,7 @@ skills/desk/
   desk.py         OS 선택 진입점. macOS는 desk로, Windows·Linux는 각 디렉터리로 넘긴다
   desk.cmd        Windows용 desk.py 호출
   desk-ssh        SSH 셸에서 Mac 콘솔 Terminal.app 워커로 중계
+  desk-tunnel.py  SSH 역방향 Unix 소켓으로 접속 클라이언트의 desk 중계
   desk-see.py     세 OS 공통: 인식 결과 결합(fusion), 비밀값 가리기(redact, redact_image)
   desk-click.py   세 OS 공통: 클릭 근거 기록과 이동·누르기 직전 대상 검증
   desk-ask.py     영역 질문(ask), 로컬 모델 그림자 답
@@ -75,7 +76,7 @@ skills/desk/
 - 소스 폴더에 실행 파일·venv·모델·로그·스크린샷·캐시를 만들지 않는다. 모두 `~/.cache/desk`(`DESK_STATE`)에 둔다. `.gitignore`가 있다고 소스 폴더에 써도 된다는 뜻은 아니다.
 - sudo, 셸 프로필, PowerShell 실행 정책, 시스템 라이브러리·서비스, kwinrc, 시스템 플러그인 디렉터리, OS 보안 설정을 바꾸지 않는다. 필요한 OS 패키지는 안내만 한다.
 - 모델 다운로드는 설치(setup) 때만 한다. 실행 중에 화면을 외부 추론 API로 보내지 않는다.
-- 자동 패치(사용자 확정, 2026-10-31): `desk-update.py`가 `begin` 전에 한 시간 간격으로 공식 GitHub 버전·배포 태그를 받고 패치한다. 작업 세션 중에는 갱신하지 않고, 로컬 변경·fork·별도 커밋은 덮어쓰지 않는다. git·스킬 사본·Claude 플러그인을 지원하고 실행기 경로를 유지한다. 플러그인 캐시·메타데이터는 Claude CLI만 갱신한다. 실패하면 기존 버전으로 실행하고 5분 뒤 재시도한다. `DESK_AUTO_UPDATE=0`(기존 `DESK_UPDATE_CHECK=0`도 지원)으로 끈다. 네트워크는 이 배포 확인·적용에만 사용하며 화면·사용자 정보를 보내지 않는다. 상세 동작·검증은 `skills/desk/docs/updates.md`를 따른다.
+- 자동 패치(사용자 확정, 2026-10-31): `desk-update.py`가 `begin` 전에 한 시간 간격으로 공식 GitHub 버전·배포 태그를 받고 패치한다. 작업 세션 중에는 갱신하지 않고, 로컬 변경·fork·별도 커밋은 덮어쓰지 않는다. git·스킬 사본·Claude 플러그인을 지원하고 실행기 경로를 유지한다. 플러그인 캐시·메타데이터는 Claude CLI만 갱신한다. 실패하면 기존 버전으로 실행하고 5분 뒤 재시도한다. `DESK_AUTO_UPDATE=0`(기존 `DESK_UPDATE_CHECK=0`도 지원)으로 끈다. 기본 네트워크는 이 배포 확인·적용에만 사용하며 화면·사용자 정보를 보내지 않는다. 사용자가 명시적으로 구성한 SSH 클라이언트 중계는 예외로, [SSH 중계 문서](skills/desk/docs/tunnel.md)의 범위에서 가린 출력·그림을 개발서버에 전달한다. 상세 동작·검증은 `skills/desk/docs/updates.md`를 따른다.
 - `ask`의 로컬 모델 답은 그림자 모드다. 종류별 30문항 이상·정확도 95% 이상·화면에 없는 답에 90% 이상 "없음"·중앙값 5초 이하를 넘기 전에는 판단 근거로 쓰지 않는다.
 - 새 서드파티 소스·가중치를 넣거나 내려받게 하면 라이선스를 확인해 README의 라이선스 절에 적는다. 업스트림 원본을 동봉할 때는 체크섬과 출처를 함께 둔다(`linux/atspi_runtime/` 참고).
 
